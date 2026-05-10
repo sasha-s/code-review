@@ -18,6 +18,66 @@ Space- or comma-separated list of PR numbers. Examples:
 
 If no PRs are given, ask the user which PRs to review before continuing. Do not invent a list.
 
+## Prerequisites — fail-fast, auto-fix where safe
+
+Before any other step, verify the review toolchain. **Every check is hard-fail.** No "skip + warn" path — degraded review is the failure mode we are explicitly preventing. Where an auto-fix is safe and cheap, attempt it once; if it doesn't resolve the check, stop.
+
+Run the checks in order. On any failure, print exactly what failed, what (if anything) was auto-fixed, and what the user must do. Then exit the skill.
+
+### P1. `gh` CLI authenticated
+```bash
+gh auth status >/dev/null 2>&1
+```
+- **Pass**: continue.
+- **Fail**: stop. Tell the user to run `gh auth login`. No auto-fix (interactive).
+
+### P2. `code-review-graph` on PATH
+```bash
+command -v code-review-graph >/dev/null 2>&1
+```
+- **Pass**: continue.
+- **Fail**: stop. Tell the user to install it (`uv tool install code-review-graph` or follow project README). No auto-fix — package installation requires user choice (uv vs pipx vs system Python, version pin, etc.).
+
+### P3. `code-review-graph` MCP registered in the current repo
+```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+test -f "${REPO_ROOT}/.mcp.json" && \
+  grep -q '"code-review-graph"' "${REPO_ROOT}/.mcp.json"
+```
+- **Pass**: continue to P4.
+- **Fail → AUTO-FIX**:
+  1. Snapshot pre-state: `git -C "${REPO_ROOT}" status --porcelain > /tmp/sar-pre.txt`.
+  2. Run `code-review-graph install --platform claude-code` from `${REPO_ROOT}`.
+  3. Clean up installer over-reach — these files are written even with `--platform claude-code`:
+     ```bash
+     cd "${REPO_ROOT}"
+     # Revert CLAUDE.md if the installer patched it.
+     git diff --quiet -- CLAUDE.md || git checkout -- CLAUDE.md
+     # Delete other-tool configs the installer creates uninvited.
+     rm -f AGENTS.md GEMINI.md .cursorrules .windsurfrules
+     ```
+  4. If `.mcp.json` and `.code-review-graph/` are not in `.gitignore`, append them (per-dev MCP setup is the standard for this org).
+  5. Re-verify P3.
+  - **Still fail after auto-fix**: stop, show the user the install output, and tell them to investigate.
+  - **Pass after auto-fix**: continue, but the MCP tools will NOT be visible in this session — Claude Code must restart to pick up a newly-written `.mcp.json`. **Stop and tell the user to restart Claude Code and re-run `/sync-and-review`.** Do not proceed into reviews with no MCP available.
+
+### P4. MCP tools visible in this session
+The presence of `.mcp.json` does not prove the MCP is loaded — Claude Code only registers MCPs at session start. Verify a representative tool is callable:
+```
+ToolSearch(query: "code-review-graph", max_results: 5)
+```
+- **Pass** (at least one `mcp__code-review-graph__*` tool returned): continue.
+- **Fail**: stop. Tell the user to restart Claude Code. No auto-fix possible (session restart cannot be done from inside the session).
+
+### P5. code-intel / repo-intel skills present
+`code-intel` is **skill-based, not MCP** — lives in `~/code-intelligence/` and surfaces as `repo-intel-*` skills.
+```bash
+ls ~/.claude/skills/ | grep -q '^repo-intel-'
+```
+- **Pass**: continue.
+- **Fail → AUTO-FIX**: if `~/code-intelligence/` exists, run its install script (typically `~/code-intelligence/integrations/vap/scripts/install.sh` or similar). Re-verify.
+  - **Still fail or `~/code-intelligence/` missing**: stop. Tell the user to clone/install `code-intelligence` and re-run.
+
 ## Steps
 
 ### 1. Verify clean working tree
@@ -48,7 +108,7 @@ If `HEAD_BEFORE != HEAD_AFTER`, run `code-review-graph update` and let it run to
 
 Use `Bash` with `run_in_background: true` and a generous `timeout` (e.g. 600000ms / 10 min), then wait for the completion notification before continuing.
 
-If `command -v code-review-graph` returns nothing, skip this step and note it in the final summary — do not fail the whole workflow.
+`code-review-graph` is a prerequisite (P2) — by this step it is guaranteed present. If the update command fails, **stop** and report the error; do not proceed to reviews against a stale graph.
 
 If `HEAD_BEFORE == HEAD_AFTER`, skip the update.
 
@@ -68,11 +128,20 @@ If `ORIGINAL_BRANCH` was not `main`, offer to switch back. Do not switch automat
 
 ### 6. Final summary
 
-Output one line per PR with the verdict from each deepreview pass. Note whether the graph was refreshed or skipped.
+Output one line per PR with the verdict from each deepreview pass. Note whether the graph was refreshed.
 
-## Failure modes to surface explicitly
+## Failure modes — fail-fast policy
 
-- Dirty working tree → ask, do not auto-stash.
-- `git pull --ff-only` rejected → stop, report, do not force.
-- `code-review-graph` missing on PATH → skip + note.
-- A single deepreview failing → continue with the rest, note the failure in the summary.
+This skill **never proceeds with a degraded toolchain**. Every prerequisite is hard-fail. Auto-fix is attempted only where it is safe and non-interactive; if auto-fix succeeds but requires a session restart (e.g. new MCP registration), the skill stops and tells the user to restart.
+
+| Condition | Auto-fix? | Action |
+| --- | --- | --- |
+| `gh` not authenticated | No (interactive) | Stop; tell user to `gh auth login` |
+| `code-review-graph` not on PATH | No (install choice) | Stop; tell user to install |
+| `.mcp.json` missing graph entry | Yes — run installer, revert side-effects | Stop after fix; tell user to restart Claude Code |
+| MCP tools not visible in session | No (session restart) | Stop; tell user to restart Claude Code |
+| `repo-intel-*` skills missing | Yes — run code-intelligence installer if repo present | Stop if auto-fix fails |
+| Dirty working tree | No (data safety) | Ask user: stash / commit / abort |
+| `git pull --ff-only` rejected | No (data safety) | Stop, report; do not force/rebase/reset |
+| `code-review-graph update` fails | No | Stop; do not review against a stale graph |
+| A single `deepreview` invocation fails | No (continue) | Note failure in summary, run remaining PRs |

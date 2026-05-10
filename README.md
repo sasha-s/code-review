@@ -27,9 +27,18 @@ Symlinked skills track the repo, so no re-install is needed after a pull (unless
 
 ## Requirements
 
-- Claude Code with the `deepreview` skill available globally (e.g. via `~/.agents/skills/deepreview`).
-- `code-review-graph` on `PATH` — used for incremental graph updates after `main` advances. If missing, `sync-and-review` skips the update step and notes it in the summary rather than failing.
-- `gh` CLI authenticated — `deepreview` uses it to fetch PR metadata.
+`/sync-and-review` is **fail-fast** — it will not proceed with a degraded toolchain. Each requirement below is checked at the start; where an auto-fix is safe, the skill attempts it once.
+
+| Requirement | Auto-fix on miss? |
+| --- | --- |
+| Claude Code with `deepreview` skill globally available (e.g. via `~/.agents/skills/deepreview`) | No |
+| `gh` CLI authenticated (`gh auth status` passes) | No — interactive login |
+| `code-review-graph` on `PATH` | No — install choice (uv / pipx / etc.) |
+| `<repo>/.mcp.json` has a `code-review-graph` entry | **Yes** — runs `code-review-graph install --platform claude-code`, reverts the installer's over-reach (CLAUDE.md patch, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`), appends `.mcp.json` + `.code-review-graph/` to `.gitignore` if missing. **Requires a Claude Code restart afterwards** — the skill stops at that point. |
+| MCP tools (`mcp__code-review-graph__*`) visible in current session | No — Claude Code restart only |
+| `repo-intel-*` skills in `~/.claude/skills/` (code-intel is skill-based, not MCP) | Yes if `~/code-intelligence/` exists — runs its installer |
+
+Installer caveat worth knowing: `code-review-graph install --platform claude-code` is opinionated and writes `.cursorrules`, `.windsurfrules`, `AGENTS.md`, `GEMINI.md`, and patches `CLAUDE.md` even when only Claude Code is targeted. The auto-fix in this skill cleans those up. If you run the installer by hand, audit `git status` afterwards.
 
 ## Adding a skill
 
