@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deep Review"
+  short_description: "Run adversarial multi-lens PR reviews"
+  default_prompt: "Use $deepreview to review this PR with adversarial reviewer lenses."

@@ -5,16 +5,32 @@ Reusable PR review workflows for Claude Code, installed as global skills.
 ## Skills
 
 - **`/sync-and-review <pr#> [pr# ...]`** — Checkout `main`, fast-forward pull, refresh `code-review-graph` if `main` moved, then run `/deepreview` sequentially against each PR number.
+- **`/deepreview <pr#>`** — Adversarial three-pass PR review: scope analysis, design summary, then reviewer-challenger dialogs through dev / security / sre / research lenses with graph-backed reconnaissance (Pass 0).
 
 ## Install
 
 ```bash
-git clone git@github.com:sasha-s/code-review.git ~/code-review
+git clone https://github.com/sasha-s/code-review.git ~/code-review
 cd ~/code-review
 ./install.sh
 ```
 
-The installer symlinks each subdirectory under `skills/` into `~/.claude/skills/<name>`. Re-running is safe — existing correct symlinks are left alone; conflicting paths are reported and require manual resolution.
+The installer is idempotent and bootstraps everything needed:
+
+1. Symlinks `skills/*` into `~/.claude/skills/` (sync-and-review, deepreview)
+2. `uv tool install code-review-graph` if the CLI is not on `PATH` (requires `uv` — see https://docs.astral.sh/uv/)
+3. Clones `github.com/sasha-s/code-intelligence` into `~/code-intelligence/` if missing
+4. Symlinks code-intelligence's `repo-intel-*` skills into `~/.claude/skills/`
+5. Symlinks `repo_intel_live_hook.py` into `~/.claude/hooks/`
+6. Checks (does NOT auto-install) `gh` CLI presence and auth
+
+Re-run safely — existing correct symlinks are left alone, already-installed CLIs skipped, already-cloned repos are not pulled.
+
+After install, set in `~/.claude/settings.json` if not already set:
+
+```json
+{ "env": { "REPO_INTEL_LIVE_HOOK": "/Users/<you>/.claude/hooks/repo_intel_live_hook.py" } }
+```
 
 ## Update
 
