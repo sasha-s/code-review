@@ -7,10 +7,10 @@
 #   - already-cloned repos are skipped (no pull, no merge)
 #
 # What this installs:
-#   1. ~/code-review/skills/* symlinked into ~/.claude/skills/    (sync-and-review, deepreview)
+#   1. ~/code-review/skills/* symlinked into Claude/Codex/Pi/shared skill roots
 #   2. code-review-graph CLI                                       (via `uv tool install`)
 #   3. ~/code-intelligence repo (cloned if missing)
-#   4. code-intelligence skills + live hook symlinked into ~/.claude
+#   4. code-intelligence skills + live hook symlinked into host skill/hook roots
 #
 # What this only CHECKS (no auto-install):
 #   - gh CLI presence and auth status
@@ -20,8 +20,18 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_SRC="${REPO_DIR}/skills"
-SKILLS_DEST="${HOME}/.claude/skills"
-HOOKS_DEST="${HOME}/.claude/hooks"
+SKILLS_DESTS=(
+  "${HOME}/.agents/skills"
+  "${HOME}/.claude/skills"
+  "${HOME}/.codex/skills"
+  "${HOME}/.pi/skills"
+)
+HOOKS_DESTS=(
+  "${HOME}/.agents/hooks"
+  "${HOME}/.claude/hooks"
+  "${HOME}/.codex/hooks"
+  "${HOME}/.pi/hooks"
+)
 
 CODE_INTEL_DIR="${HOME}/code-intelligence"
 CODE_INTEL_REPO="https://github.com/sasha-s/code-intelligence.git"
@@ -35,7 +45,11 @@ warn()  { printf '  warn  %s\n' "$*" >&2; }
 fail()  { printf '  err   %s\n' "$*" >&2; exit 1; }
 note()  { printf '        %s\n' "$*"; }
 
-# --- 1. symlink ~/code-review/skills/* into ~/.claude/skills/ ---------------
+# --- 1. symlink skills into assistant skill roots ---------------------------
+
+canonical_path() {
+  realpath "$1" 2>/dev/null || printf '%s\n' "$1"
+}
 
 link_skill_dir() {
   local src="$1"
@@ -46,27 +60,56 @@ link_skill_dir() {
   if [[ -L "${link}" ]]; then
     local existing
     existing="$(readlink "${link}")"
-    if [[ "${existing}" == "${src}" ]]; then
+    if [[ "$(canonical_path "${link}")" == "$(canonical_path "${src}")" ]]; then
       ok  "${name}  (already linked)"
       return 0
     fi
-    fail "${name}  (symlink points elsewhere: ${existing}); remove ${link} manually and re-run"
+    warn "${name}  (symlink points elsewhere: ${existing}); leaving ${link} untouched"
+    return 0
   fi
   if [[ -e "${link}" ]]; then
-    fail "${name}  (path exists and is not a symlink: ${link}); remove it manually and re-run"
+    warn "${name}  (path exists and is not a symlink: ${link}); leaving it untouched"
+    return 0
+  fi
+  ln -s "${src}" "${link}"
+  fix "${name}  ->  ${src}"
+}
+
+link_file() {
+  local src="$1"
+  local link="$2"
+  local name
+  name="$(basename "${src}")"
+
+  if [[ -L "${link}" ]]; then
+    local existing
+    existing="$(readlink "${link}")"
+    if [[ "$(canonical_path "${link}")" == "$(canonical_path "${src}")" ]]; then
+      ok  "${name}  (already linked)"
+      return 0
+    fi
+    warn "${name}  (symlink points elsewhere: ${existing}); leaving ${link} untouched"
+    return 0
+  fi
+  if [[ -e "${link}" ]]; then
+    warn "${name}  (path exists and is not a symlink: ${link}); leaving it untouched"
+    return 0
   fi
   ln -s "${src}" "${link}"
   fix "${name}  ->  ${src}"
 }
 
 install_local_skills() {
-  step "Local skills (${SKILLS_SRC} -> ${SKILLS_DEST})"
+  step "Local skills"
   [[ -d "${SKILLS_SRC}" ]] || fail "${SKILLS_SRC} not found"
-  mkdir -p "${SKILLS_DEST}"
-  for skill_path in "${SKILLS_SRC}"/*/; do
-    [[ -d "${skill_path}" ]] || continue
-    local src="${skill_path%/}"
-    link_skill_dir "${src}" "${SKILLS_DEST}/$(basename "${src}")"
+  for dest in "${SKILLS_DESTS[@]}"; do
+    note "${SKILLS_SRC} -> ${dest}"
+    mkdir -p "${dest}"
+    for skill_path in "${SKILLS_SRC}"/*/; do
+      [[ -d "${skill_path}" ]] || continue
+      local src="${skill_path%/}"
+      link_skill_dir "${src}" "${dest}/$(basename "${src}")"
+    done
   done
 }
 
@@ -108,38 +151,32 @@ install_code_intelligence_skills() {
   if [[ ! -d "${ci_skills_dir}" ]]; then
     fail "${ci_skills_dir} not found; clone of ${CODE_INTEL_REPO} may be stale (missing integrations/vap)"
   fi
-  for skill_path in "${ci_skills_dir}"/*/; do
-    [[ -d "${skill_path}" ]] || continue
-    local src="${skill_path%/}"
-    link_skill_dir "${src}" "${SKILLS_DEST}/$(basename "${src}")"
-  done
+  for dest in "${SKILLS_DESTS[@]}"; do
+    note "${ci_skills_dir} -> ${dest}"
+    mkdir -p "${dest}"
+    for skill_path in "${ci_skills_dir}"/*/; do
+      [[ -d "${skill_path}" ]] || continue
+      local src="${skill_path%/}"
+      link_skill_dir "${src}" "${dest}/$(basename "${src}")"
+    done
 
-  # repo-intel-live lives one level up (under integrations/vap/skills/, not claude/skills/)
-  local live_src="${CODE_INTEL_DIR}/integrations/vap/skills/repo-intel-live"
-  if [[ -d "${live_src}" ]]; then
-    link_skill_dir "${live_src}" "${SKILLS_DEST}/repo-intel-live"
-  fi
+    # repo-intel-live lives one level up (under integrations/vap/skills/, not claude/skills/)
+    local live_src="${CODE_INTEL_DIR}/integrations/vap/skills/repo-intel-live"
+    if [[ -d "${live_src}" ]]; then
+      link_skill_dir "${live_src}" "${dest}/repo-intel-live"
+    fi
+  done
 }
 
 install_code_intelligence_hook() {
   step "repo-intel live hook"
   local hook_src="${CODE_INTEL_DIR}/integrations/vap/scripts/repo_intel_live_hook.py"
-  local hook_link="${HOOKS_DEST}/repo_intel_live_hook.py"
   [[ -f "${hook_src}" ]] || fail "${hook_src} not found in clone"
-  mkdir -p "${HOOKS_DEST}"
-  if [[ -L "${hook_link}" ]]; then
-    local existing
-    existing="$(readlink "${hook_link}")"
-    if [[ "${existing}" == "${hook_src}" ]]; then
-      ok "repo_intel_live_hook.py  (already linked)"
-      return 0
-    fi
-    fail "repo_intel_live_hook.py symlink points elsewhere (${existing}); remove ${hook_link} and re-run"
-  fi
-  [[ -e "${hook_link}" ]] && fail "${hook_link} exists and is not a symlink"
-  ln -s "${hook_src}" "${hook_link}"
-  fix "repo_intel_live_hook.py  ->  ${hook_src}"
-  note "remember to set REPO_INTEL_LIVE_HOOK=${hook_link} in ~/.claude/settings.json env"
+  for dest in "${HOOKS_DESTS[@]}"; do
+    mkdir -p "${dest}"
+    link_file "${hook_src}" "${dest}/repo_intel_live_hook.py"
+  done
+  note "set REPO_INTEL_LIVE_HOOK=${HOME}/.agents/hooks/repo_intel_live_hook.py in hosts that need an explicit hook path"
 }
 
 # --- 4. gh CLI presence (check only) ----------------------------------------
@@ -167,12 +204,11 @@ install_code_intelligence_hook
 check_gh
 
 echo
-echo "Done. Available skills under ${SKILLS_DEST}:"
-for d in "${SKILLS_DEST}"/*/; do
-  [[ -L "${d%/}" ]] || continue
-  printf '  /%s\n' "$(basename "${d%/}")"
+echo "Done. Skill roots checked:"
+for dest in "${SKILLS_DESTS[@]}"; do
+  printf '  %s\n' "${dest}"
 done
 echo
 echo "Next: run '/sync-and-review <pr#> [pr# ...]' from any repo you want to review."
-echo "First time in a given repo, the skill will register code-review-graph MCP in <repo>/.mcp.json"
-echo "and ask you to restart Claude Code so the MCP tools become available."
+echo "First time in a given Claude Code repo, the skill can register code-review-graph MCP in <repo>/.mcp.json."
+echo "For Codex and Pi, configure code-review-graph in that host's MCP/tool settings, then restart or reload the host."

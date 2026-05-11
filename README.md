@@ -1,10 +1,10 @@
 # code-review
 
-Reusable PR review workflows for Claude Code, installed as global skills.
+Reusable PR review workflows for Claude Code, Codex, and Pi, installed as global skills.
 
 ## Skills
 
-- **`/sync-and-review <pr#> [pr# ...]`** — Checkout `main`, fast-forward pull, refresh `code-review-graph` if `main` moved, then run `/deepreview` sequentially against each PR number.
+- **`/sync-and-review <pr#> [pr# ...]`** — Checkout `main`, fast-forward pull, refresh `code-review-graph` if `main` moved, then run `deepreview` sequentially against each PR number.
 - **`/deepreview <pr#>`** — Adversarial three-pass PR review: scope analysis, design summary, then reviewer-challenger dialogs through dev / security / sre / research lenses with graph-backed reconnaissance (Pass 0).
 
 ## Install
@@ -17,19 +17,19 @@ cd ~/code-review
 
 The installer is idempotent and bootstraps everything needed:
 
-1. Symlinks `skills/*` into `~/.claude/skills/` (sync-and-review, deepreview)
+1. Symlinks `skills/*` into shared and host skill roots: `~/.agents/skills/`, `~/.claude/skills/`, `~/.codex/skills/`, and `~/.pi/skills/`
 2. `uv tool install code-review-graph` if the CLI is not on `PATH` (requires `uv` — see https://docs.astral.sh/uv/)
 3. Clones `github.com/sasha-s/code-intelligence` into `~/code-intelligence/` if missing
-4. Symlinks code-intelligence's `repo-intel-*` skills into `~/.claude/skills/`
-5. Symlinks `repo_intel_live_hook.py` into `~/.claude/hooks/`
+4. Symlinks code-intelligence's `repo-intel-*` skills into the same skill roots
+5. Symlinks `repo_intel_live_hook.py` into shared and host hook roots: `~/.agents/hooks/`, `~/.claude/hooks/`, `~/.codex/hooks/`, and `~/.pi/hooks/`
 6. Checks (does NOT auto-install) `gh` CLI presence and auth
 
-Re-run safely — existing correct symlinks are left alone, already-installed CLIs skipped, already-cloned repos are not pulled.
+Re-run safely — existing correct symlinks are left alone, already-installed CLIs skipped, already-cloned repos are not pulled, and pre-existing non-symlink skills are left untouched with a warning.
 
-After install, set in `~/.claude/settings.json` if not already set:
+After install, hosts that need an explicit repo-intel hook path should set:
 
-```json
-{ "env": { "REPO_INTEL_LIVE_HOOK": "/Users/<you>/.claude/hooks/repo_intel_live_hook.py" } }
+```bash
+REPO_INTEL_LIVE_HOOK=/Users/<you>/.agents/hooks/repo_intel_live_hook.py
 ```
 
 ## Update
@@ -47,14 +47,15 @@ Symlinked skills track the repo, so no re-install is needed after a pull (unless
 
 | Requirement | Auto-fix on miss? |
 | --- | --- |
-| Claude Code with `deepreview` skill globally available (e.g. via `~/.agents/skills/deepreview`) | No |
+| Current host (Claude Code, Codex, or Pi) can load `sync-and-review` and `deepreview` skills | Run `./install.sh` |
 | `gh` CLI authenticated (`gh auth status` passes) | No — interactive login |
 | `code-review-graph` on `PATH` | No — install choice (uv / pipx / etc.) |
-| `<repo>/.mcp.json` has a `code-review-graph` entry | **Yes** — runs `code-review-graph install --platform claude-code`, reverts the installer's over-reach (CLAUDE.md patch, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`), appends `.mcp.json` + `.code-review-graph/` to `.gitignore` if missing. **Requires a Claude Code restart afterwards** — the skill stops at that point. |
-| MCP tools (`mcp__code-review-graph__*`) visible in current session | No — Claude Code restart only |
-| `repo-intel-*` skills in `~/.claude/skills/` (code-intel is skill-based, not MCP) | Yes if `~/code-intelligence/` exists — runs its installer |
+| Claude Code `<repo>/.mcp.json` has a `code-review-graph` entry | **Yes** — runs `code-review-graph install --platform claude-code`, reverts the installer's over-reach (CLAUDE.md patch, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`), appends `.mcp.json` + `.code-review-graph/` to `.gitignore` if missing. **Requires a Claude Code restart afterwards** — the skill stops at that point. |
+| Codex/Pi has a loaded `code-review-graph` MCP/tool integration | No generic auto-fix — configure the host, then restart or reload it |
+| MCP/tools visible in current session | No — host restart/reload only |
+| `repo-intel-*` skills visible in the current host's skill roots (code-intel is skill-based, not MCP) | Yes if `~/code-review/install.sh` is present |
 
-Installer caveat worth knowing: `code-review-graph install --platform claude-code` is opinionated and writes `.cursorrules`, `.windsurfrules`, `AGENTS.md`, `GEMINI.md`, and patches `CLAUDE.md` even when only Claude Code is targeted. The auto-fix in this skill cleans those up. If you run the installer by hand, audit `git status` afterwards.
+Installer caveat worth knowing: `code-review-graph install --platform claude-code` is opinionated and writes `.cursorrules`, `.windsurfrules`, `AGENTS.md`, `GEMINI.md`, and patches `CLAUDE.md` even when only Claude Code is targeted. The auto-fix in this skill cleans those up. Codex and Pi setup does not use that Claude installer path; configure their MCP/tool integration in the host's own settings.
 
 ## Adding a skill
 
