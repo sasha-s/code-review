@@ -1,0 +1,644 @@
+{
+  "version": 1,
+  "name": "review-lab-analysis-only-concern-repository",
+  "created_for": "offline analysis and future selector design",
+  "review_injection_policy": "forbidden",
+  "policy_notes": [
+    "Do not include this catalog in live code review prompts.",
+    "Do not reference this catalog from global skills.",
+    "Do not copy this catalog into benchmark child workspaces.",
+    "Use only for offline mining, categorization, and selector experiments with separate measurement."
+  ],
+  "concerns": [
+    {
+      "id": "uri-fetch-scheme-allowlist",
+      "family": "trust-boundary",
+      "trigger_signals": ["open(url)", "fetch remote URL", "URI.parse", "Net::HTTP", "requests.get", "http client from user input"],
+      "generic_invariant": "A remote fetch must restrict schemes before network access.",
+      "questions": ["Can attacker-controlled input select file, gopher, ftp, or other non-http schemes?", "Is validation applied before redirects or only to the first URL?"],
+      "evidence_to_collect": ["source of URL", "scheme validation", "network call site", "redirect behavior"],
+      "common_false_positives": ["URL is hardcoded", "URL comes from trusted config with deployment controls"]
+    },
+    {
+      "id": "uri-fetch-host-allowlist-exactness",
+      "family": "trust-boundary",
+      "trigger_signals": ["host allowlist", "allowed domain", "embed host", "callback URL", "webhook target"],
+      "generic_invariant": "Host allowlists must compare canonical hostnames exactly or by validated suffix boundary.",
+      "questions": ["Does substring matching allow sibling or suffix spoofing?", "Are ports, trailing dots, case, and punycode normalized consistently?"],
+      "evidence_to_collect": ["allowlist predicate", "host parser", "stored host format", "caller examples"],
+      "common_false_positives": ["URL parser already returns canonical host and exact comparison is used"]
+    },
+    {
+      "id": "uri-fetch-private-network-ssrf",
+      "family": "trust-boundary",
+      "trigger_signals": ["server-side fetch", "preview URL", "import from URL", "webhook test", "metadata service"],
+      "generic_invariant": "Server-side fetches must block private, loopback, link-local, and metadata network targets after DNS resolution.",
+      "questions": ["Can DNS resolve a public-looking host to internal addresses?", "Are redirects rechecked against private network rules?"],
+      "evidence_to_collect": ["DNS resolution policy", "IP range blocklist", "redirect handling", "timeout and retry policy"],
+      "common_false_positives": ["fetch runs only in a client browser", "network egress is isolated by infrastructure policy"]
+    },
+    {
+      "id": "uri-fetch-redirect-policy",
+      "family": "trust-boundary",
+      "trigger_signals": ["follow redirects", "HTTP client default redirects", "download URL", "avatar import"],
+      "generic_invariant": "Redirect targets must preserve the same trust policy as the original URL.",
+      "questions": ["Does the client follow redirects automatically?", "Are scheme, host, and private-network checks repeated for each redirect hop?"],
+      "evidence_to_collect": ["HTTP client defaults", "redirect callback", "validation location"],
+      "common_false_positives": ["redirects are disabled", "redirects are handled by a safe proxy"]
+    },
+    {
+      "id": "uri-fetch-timeout-size-content",
+      "family": "resource-safety",
+      "trigger_signals": ["download", "remote image", "open-uri", "streaming response", "attachment import"],
+      "generic_invariant": "Remote content fetches need explicit timeout, maximum bytes, and content-type or decoder checks.",
+      "questions": ["Can a slow or huge response tie up workers?", "Can content type or extension select an unsafe decoder path?"],
+      "evidence_to_collect": ["timeouts", "max body size", "streaming limits", "decoder selection"],
+      "common_false_positives": ["upstream gateway enforces hard body and duration limits"]
+    },
+    {
+      "id": "browser-postmessage-target-origin",
+      "family": "browser-boundary",
+      "trigger_signals": ["postMessage", "message event", "iframe", "embed", "targetOrigin"],
+      "generic_invariant": "Cross-frame messages must use a precise target origin and validate sender origin exactly.",
+      "questions": ["Is targetOrigin a full URL, wildcard, or stale referrer?", "Does receiver parse event.origin rather than trusting event.data?"],
+      "evidence_to_collect": ["postMessage call", "message listener", "origin construction", "iframe src policy"],
+      "common_false_positives": ["same-origin frame with no attacker-controlled ancestor"]
+    },
+    {
+      "id": "browser-origin-substring-spoofing",
+      "family": "browser-boundary",
+      "trigger_signals": ["origin.includes", "indexOf(origin)", "endsWith(domain)", "allowed origin check"],
+      "generic_invariant": "Origin checks must not accept attacker-controlled sibling domains or path substrings.",
+      "questions": ["Does the code compare origin strings without URL parsing?", "Are scheme and port included in the trusted origin?"],
+      "evidence_to_collect": ["origin predicate", "configured trusted origins", "URL parser behavior"],
+      "common_false_positives": ["allowlist values include leading dot semantics and boundary checks"]
+    },
+    {
+      "id": "browser-frame-ancestors-referrer",
+      "family": "browser-boundary",
+      "trigger_signals": ["X-Frame-Options", "frame-ancestors", "Referer", "ALLOWALL", "embedding"],
+      "generic_invariant": "Frame permission must not rely on spoofable or privacy-stripped referrer data.",
+      "questions": ["Does the frame decision fall back open when referrer is absent?", "Does policy distinguish trusted embed hosts from arbitrary parents?"],
+      "evidence_to_collect": ["response headers", "referrer parsing", "site setting", "embed route"],
+      "common_false_positives": ["route is public and intentionally embeddable"]
+    },
+    {
+      "id": "browser-referrer-js-escaping",
+      "family": "browser-boundary",
+      "trigger_signals": ["render referrer into script", "embed bootstrap", "onebox", "javascript string interpolation"],
+      "generic_invariant": "Values rendered into JavaScript must use JavaScript-string escaping, not HTML escaping alone.",
+      "questions": ["Can URL, title, or referrer break out of a quoted JS context?", "Does template helper escape for the actual sink type?"],
+      "evidence_to_collect": ["template context", "escaping helper", "input source"],
+      "common_false_positives": ["value is JSON-encoded by a trusted serializer"]
+    },
+    {
+      "id": "browser-opener-cross-origin",
+      "family": "browser-boundary",
+      "trigger_signals": ["window.open", "target=_blank", "opener", "OAuth popup", "external link"],
+      "generic_invariant": "New windows that navigate cross-origin should not retain opener privileges unless intentionally needed.",
+      "questions": ["Is rel=noopener applied?", "Can popup callbacks be confused across origins or tabs?"],
+      "evidence_to_collect": ["link/render helper", "popup callback flow", "origin checks"],
+      "common_false_positives": ["browser framework always adds noopener"]
+    },
+    {
+      "id": "authz-per-item-vs-bulk-parity",
+      "family": "authorization",
+      "trigger_signals": ["bulk endpoint", "search/count", "list API", "per item check", "group membership"],
+      "generic_invariant": "Bulk/list authorization must be equivalent to per-item authorization.",
+      "questions": ["Does the list predicate include every parent or inherited permission checked per item?", "Can count/search reveal inaccessible objects?"],
+      "evidence_to_collect": ["single-object auth path", "bulk query predicate", "inheritance model"],
+      "common_false_positives": ["bulk endpoint returns only objects already scoped by tenant partition"]
+    },
+    {
+      "id": "authz-role-boolean-combination",
+      "family": "authorization",
+      "trigger_signals": ["isAdmin", "isOwner", "&&", "||", "team role", "permission guard"],
+      "generic_invariant": "Boolean combinations of roles must match the intended permission lattice.",
+      "questions": ["Did an AND replace intended OR or vice versa?", "Are owner-only, admin-only, and admin-owner cases tested separately?"],
+      "evidence_to_collect": ["role definitions", "guard expression", "UI/API callers", "tests by role"],
+      "common_false_positives": ["business rule intentionally requires both roles and docs say so"]
+    },
+    {
+      "id": "authz-parent-group-hierarchy",
+      "family": "authorization",
+      "trigger_signals": ["parent group", "nested group", "realm role", "membership inheritance"],
+      "generic_invariant": "Inherited permissions must be applied consistently across all lookup paths.",
+      "questions": ["Does direct membership logic diverge from inherited membership logic?", "Do search/count paths walk the same hierarchy?"],
+      "evidence_to_collect": ["membership traversal", "query predicates", "tests for inherited access"],
+      "common_false_positives": ["feature explicitly excludes inherited membership"]
+    },
+    {
+      "id": "authn-state-binding",
+      "family": "authentication",
+      "trigger_signals": ["OAuth state", "nonce", "callback", "pipeline state", "session binding"],
+      "generic_invariant": "Authentication callbacks must bind state to the right session/user and handle absent or mismatched state safely.",
+      "questions": ["Can callback proceed with missing state?", "Is state signed, scoped, and consumed once?"],
+      "evidence_to_collect": ["state creation", "state validation", "callback error path", "storage key"],
+      "common_false_positives": ["identity provider library enforces state before application callback"]
+    },
+    {
+      "id": "auth-token-id-parsing-canonicalization",
+      "family": "authentication",
+      "trigger_signals": ["token id", "grant type", "split", "parse raw token", "credential id"],
+      "generic_invariant": "Token IDs and parsed auth fields must round-trip without ambiguity across all grant variants.",
+      "questions": ["Can separators appear inside user-controlled components?", "Does shortcut encoding collide across grant types?"],
+      "evidence_to_collect": ["token construction", "parser", "null checks", "callers by grant type"],
+      "common_false_positives": ["parser consumes a fixed internal format never exposed to user input"]
+    },
+    {
+      "id": "data-raw-sql-bypasses-callbacks",
+      "family": "data-consistency",
+      "trigger_signals": ["raw SQL migration", "UPDATE table", "before_validation", "callback normalization"],
+      "generic_invariant": "Raw SQL writes must preserve model-level normalization, callbacks, defaults, and constraints.",
+      "questions": ["Does the model normalize fields that the migration writes directly?", "Will old rows bypass canonical storage format?"],
+      "evidence_to_collect": ["model callbacks", "migration SQL", "validators", "lookup predicates"],
+      "common_false_positives": ["database generated column or constraint performs the same normalization"]
+    },
+    {
+      "id": "data-migration-default-backcompat",
+      "family": "data-consistency",
+      "trigger_signals": ["migration default", "not null", "new column", "backfill", "rollback"],
+      "generic_invariant": "Schema migrations must preserve read/write compatibility for old, new, and rolled-back code.",
+      "questions": ["Can existing rows violate new assumptions?", "Does rollback code read new data safely?"],
+      "evidence_to_collect": ["migration", "model defaults", "read path", "rollback path"],
+      "common_false_positives": ["online migration framework guarantees phased deploy order"]
+    },
+    {
+      "id": "data-writer-reader-key-parity",
+      "family": "data-consistency",
+      "trigger_signals": ["cache key", "store key", "lookup key", "delete key", "resource owner"],
+      "generic_invariant": "The key used to write, read, update, and delete a resource must be identical after normalization.",
+      "questions": ["Does one side include tenant/user/time suffix that the other omits?", "Are display IDs confused with storage IDs?"],
+      "evidence_to_collect": ["writer", "reader", "deleter", "normalization function"],
+      "common_false_positives": ["key translation table is explicitly shared and tested"]
+    },
+    {
+      "id": "data-cache-invalidation-scope",
+      "family": "data-consistency",
+      "trigger_signals": ["cache", "memoize", "invalidate", "clear", "reload", "tenant"],
+      "generic_invariant": "Cache invalidation must target the same scope and canonical key as cache population.",
+      "questions": ["Can one tenant invalidate another or fail to invalidate itself?", "Do configuration changes invalidate derived values?"],
+      "evidence_to_collect": ["cache read key", "cache write key", "invalidator", "lifecycle event"],
+      "common_false_positives": ["cache is request-local and discarded before mutation can matter"]
+    },
+    {
+      "id": "data-process-unstable-hash-key",
+      "family": "data-consistency",
+      "trigger_signals": ["hash()", "object hash", "process restart", "persistent cache key", "shard key"],
+      "generic_invariant": "Persistent or cross-process keys must use stable serialization and hashing.",
+      "questions": ["Does built-in hash randomization affect persisted keys?", "Is hash used only inside one process lifetime?"],
+      "evidence_to_collect": ["key construction", "cache backend", "persistence lifetime"],
+      "common_false_positives": ["hash is used only for ephemeral in-memory bucketing"]
+    },
+    {
+      "id": "data-null-empty-false-missing",
+      "family": "data-consistency",
+      "trigger_signals": ["if value", "present?", "blank?", "None", "nil", "false", "0", "empty string"],
+      "generic_invariant": "Missing, false, zero, empty, and null must be distinguished when domain semantics differ.",
+      "questions": ["Does false get treated as missing?", "Does blank input trigger mutation before validation?"],
+      "evidence_to_collect": ["predicate", "domain values", "validation path", "storage format"],
+      "common_false_positives": ["domain explicitly treats all falsy values as absence"]
+    },
+    {
+      "id": "data-case-locale-unicode-normalization",
+      "family": "normalization",
+      "trigger_signals": ["lower()", "case-insensitive", "locale", "host", "email", "username"],
+      "generic_invariant": "Canonicalization must be applied consistently at write, lookup, compare, and unique-index boundaries.",
+      "questions": ["Does one path lower-case while another preserves case?", "Does locale-sensitive casing produce different keys?"],
+      "evidence_to_collect": ["write normalization", "lookup predicate", "unique index", "tests with mixed case"],
+      "common_false_positives": ["database collation enforces intended comparison semantics"]
+    },
+    {
+      "id": "data-string-symbol-key-parity",
+      "family": "normalization",
+      "trigger_signals": ["symbol key", "string key", "JSON", "YAML", "locale key", "hash lookup"],
+      "generic_invariant": "Key types must be normalized when data crosses serialization boundaries.",
+      "questions": ["Can String and Symbol versions of the same key create double loads or misses?", "Does serialization convert keys before cache lookup?"],
+      "evidence_to_collect": ["producer key type", "consumer key type", "cache key", "serialization format"],
+      "common_false_positives": ["framework normalizes keys at object construction"]
+    },
+    {
+      "id": "data-host-port-normalization",
+      "family": "normalization",
+      "trigger_signals": ["host", "domain", "port", "origin", "embed host", "lower(host)"],
+      "generic_invariant": "Host, port, and origin representations must be normalized for the exact security or routing decision.",
+      "questions": ["Does storage strip port while runtime compare includes it?", "Are default ports and trailing dots normalized?"],
+      "evidence_to_collect": ["stored value", "runtime parser", "comparison predicate", "configuration UI"],
+      "common_false_positives": ["the domain model intentionally treats host and origin as different concepts"]
+    },
+    {
+      "id": "concurrency-check-then-act-consumption",
+      "family": "concurrency",
+      "trigger_signals": ["consume code", "read then update", "redeem", "delete after lookup", "one-time token"],
+      "generic_invariant": "Single-use resources must be checked and consumed atomically.",
+      "questions": ["Can concurrent requests both pass the check before either writes?", "Does database update include the consumed predicate?"],
+      "evidence_to_collect": ["read path", "write path", "transaction/lock", "unique or conditional update"],
+      "common_false_positives": ["outer transaction uses serializable isolation or row lock"]
+    },
+    {
+      "id": "concurrency-lazy-singleton",
+      "family": "concurrency",
+      "trigger_signals": ["lazy load", "global cache", "singleton", "loaded flag", "class variable"],
+      "generic_invariant": "Shared lazy state must be thread-safe and canonicalized across equivalent keys.",
+      "questions": ["Can two threads partially initialize the same state?", "Can equivalent keys create duplicate entries?"],
+      "evidence_to_collect": ["guard variable", "lock", "write order", "key normalization"],
+      "common_false_positives": ["runtime is single-threaded for the relevant object"]
+    },
+    {
+      "id": "concurrency-queue-shutdown-semantics",
+      "family": "concurrency",
+      "trigger_signals": ["queue shutdown", "worker stop", "immediate=false", "drain", "sentinel"],
+      "generic_invariant": "Queue shutdown must preserve intended drain, cancellation, and worker wakeup semantics.",
+      "questions": ["Does the runtime API support the requested shutdown mode?", "Can producers enqueue after shutdown or consumers hang?"],
+      "evidence_to_collect": ["queue API version", "producer path", "consumer loop", "shutdown caller"],
+      "common_false_positives": ["queue abstraction wraps the runtime API with compatible behavior"]
+    },
+    {
+      "id": "concurrency-cache-load-dedup",
+      "family": "concurrency",
+      "trigger_signals": ["cache miss", "load if absent", "double check", "promise cache", "inflight"],
+      "generic_invariant": "Concurrent cache misses should not duplicate unsafe side effects or persist stale failures.",
+      "questions": ["Does the second check happen inside the lock?", "Are failed loads cached permanently?"],
+      "evidence_to_collect": ["miss branch", "lock/inflight map", "error cleanup", "test under concurrency"],
+      "common_false_positives": ["duplicated load is idempotent and cheap by design"]
+    },
+    {
+      "id": "concurrency-cleanup-partial-failure",
+      "family": "concurrency",
+      "trigger_signals": ["delete local then remote", "cleanup", "rollback", "finally", "external resource"],
+      "generic_invariant": "Multi-resource cleanup must define ordering, retry, and partial failure behavior.",
+      "questions": ["Can local deletion hide a still-live remote resource?", "Is retry idempotent after partial success?"],
+      "evidence_to_collect": ["operation order", "error handling", "retry job", "resource identity"],
+      "common_false_positives": ["remote resource has independent expiration and low impact"]
+    },
+    {
+      "id": "api-response-shape-error-parity",
+      "family": "api-contract",
+      "trigger_signals": ["error response", "422", "validation error", "JSON shape", "API client"],
+      "generic_invariant": "Equivalent error branches should preserve documented response shapes.",
+      "questions": ["Does a new branch return a string where clients expect an object?", "Do status code and body semantics agree?"],
+      "evidence_to_collect": ["old branch", "new branch", "client parser", "API docs/tests"],
+      "common_false_positives": ["endpoint is private and no stable response contract exists"]
+    },
+    {
+      "id": "api-pagination-negative-offset",
+      "family": "api-contract",
+      "trigger_signals": ["pagination", "cursor", "offset", "slice", "limit", "page"],
+      "generic_invariant": "Pagination inputs must be bounded before they reach slicing or database offset semantics.",
+      "questions": ["Can negative offset produce empty/wrong slices or expensive queries?", "Are cursor and limit validated together?"],
+      "evidence_to_collect": ["input parser", "bounds checks", "ORM slicing behavior", "client contract"],
+      "common_false_positives": ["framework validates query params before handler execution"]
+    },
+    {
+      "id": "api-status-code-contract",
+      "family": "api-contract",
+      "trigger_signals": ["status code", "raise error", "HTTPException", "response helper", "REST endpoint"],
+      "generic_invariant": "Status code, error type, and documented client behavior must remain aligned after refactor.",
+      "questions": ["Did a generic exception replace a typed HTTP error?", "Do clients branch on old status codes?"],
+      "evidence_to_collect": ["before behavior", "after behavior", "client call sites", "contract tests"],
+      "common_false_positives": ["error path is intentionally normalized across endpoints"]
+    },
+    {
+      "id": "api-query-filter-count-parity",
+      "family": "api-contract",
+      "trigger_signals": ["count query", "list query", "search query", "filter", "WHERE"],
+      "generic_invariant": "Count/search/list queries must apply equivalent filters unless differences are intentional.",
+      "questions": ["Can UI show count for inaccessible or absent records?", "Does pagination use a different predicate than the returned rows?"],
+      "evidence_to_collect": ["count query", "data query", "authorization filters", "test with excluded rows"],
+      "common_false_positives": ["count intentionally reports unfiltered global total"]
+    },
+    {
+      "id": "api-external-retry-idempotency",
+      "family": "api-contract",
+      "trigger_signals": ["retry", "webhook", "external API", "idempotency key", "charge", "calendar"],
+      "generic_invariant": "Retried external operations need stable idempotency or safe duplicate handling.",
+      "questions": ["Can retry create duplicate remote objects?", "Is idempotency key stable across process restarts?"],
+      "evidence_to_collect": ["remote API call", "retry scheduler", "idempotency key", "duplicate reconciliation"],
+      "common_false_positives": ["external provider guarantees idempotency for the operation"]
+    },
+    {
+      "id": "frontend-react-key-identity",
+      "family": "frontend",
+      "trigger_signals": ["map(", "React list", "key prop", "render array", "component identity"],
+      "generic_invariant": "Rendered list identity must be stable and unique across reorder, insert, and delete operations.",
+      "questions": ["Does missing or index key corrupt local component state?", "Can duplicate keys collapse rows?"],
+      "evidence_to_collect": ["render loop", "item ID", "stateful child", "reorder behavior"],
+      "common_false_positives": ["static list never reorders and children are stateless"]
+    },
+    {
+      "id": "frontend-stale-closure-state",
+      "family": "frontend",
+      "trigger_signals": ["useEffect", "useCallback", "dependency array", "event handler", "async setState"],
+      "generic_invariant": "UI callbacks must read current state or declare the dependencies they use.",
+      "questions": ["Can async handler commit stale values?", "Does dependency omission hide a changing prop or permission?"],
+      "evidence_to_collect": ["hook dependencies", "state updates", "event sequence", "tests"],
+      "common_false_positives": ["value is intentionally stable by ref or external invariant"]
+    },
+    {
+      "id": "frontend-optimistic-rollback",
+      "family": "frontend",
+      "trigger_signals": ["optimistic update", "mutation", "onError", "rollback", "cache update"],
+      "generic_invariant": "Optimistic UI changes must rollback or reconcile on failure and race with later mutations safely.",
+      "questions": ["Can failed mutation leave UI in impossible state?", "Does rollback overwrite a newer successful update?"],
+      "evidence_to_collect": ["optimistic write", "error handler", "query invalidation", "mutation key"],
+      "common_false_positives": ["server push immediately reconciles every client state"]
+    },
+    {
+      "id": "frontend-form-validation-state-reset",
+      "family": "frontend",
+      "trigger_signals": ["form state", "validation error", "reset", "dialog", "dirty fields"],
+      "generic_invariant": "Form state must reset or persist intentionally across open/close, entity switch, and validation failure.",
+      "questions": ["Can errors from one entity appear on another?", "Does invalid input mutate state before validation?"],
+      "evidence_to_collect": ["form initialization", "entity key", "reset calls", "validation path"],
+      "common_false_positives": ["form component is remounted with a stable unique key"]
+    },
+    {
+      "id": "frontend-disabled-control-submit",
+      "family": "frontend",
+      "trigger_signals": ["disabled", "submit button", "permission", "loading", "double click"],
+      "generic_invariant": "Disabled UI affordances must not be the only enforcement of a server-side rule.",
+      "questions": ["Can API call still be made directly?", "Can double click or stale disabled state submit twice?"],
+      "evidence_to_collect": ["UI disabled condition", "server guard", "mutation dedup", "tests"],
+      "common_false_positives": ["control only improves UX and server guard is unchanged"]
+    },
+    {
+      "id": "css-mechanical-color-outlier",
+      "family": "stylesheet",
+      "trigger_signals": ["SCSS color replacement", "lightness", "dark mode", "mechanical substitution", "contrast"],
+      "generic_invariant": "Mechanical style substitutions need outlier checks against context and theme semantics.",
+      "questions": ["Does one replacement invert contrast relative to siblings?", "Are dark and light mode variants both updated?"],
+      "evidence_to_collect": ["old/new color groups", "selector context", "theme variables", "visual states"],
+      "common_false_positives": ["design system token guarantees accessible contrast"]
+    },
+    {
+      "id": "css-flex-grid-no-js-layout",
+      "family": "stylesheet",
+      "trigger_signals": ["float to flex", "inline-block to flex", "grid migration", "noscript", "legacy DOM"],
+      "generic_invariant": "Layout migrations must preserve non-JS, legacy, and alternate DOM variants.",
+      "questions": ["Did removed float/inline behavior align a no-JS branch?", "Do flex children need min-width or shrink constraints?"],
+      "evidence_to_collect": ["old layout rule", "new layout rule", "alternate markup", "child sizing"],
+      "common_false_positives": ["alternate DOM path was removed in the same change"]
+    },
+    {
+      "id": "css-vendor-prefix-semantics",
+      "family": "stylesheet",
+      "trigger_signals": ["-ms-", "-webkit-", "mixin", "autoprefixer", "align-items"],
+      "generic_invariant": "Vendor-prefixed declarations must map to valid equivalent properties for supported browsers.",
+      "questions": ["Is an invalid prefixed property harmless because a valid one is also emitted?", "Does order affect fallback behavior?"],
+      "evidence_to_collect": ["compiled CSS", "mixin output", "browser support target", "declaration order"],
+      "common_false_positives": ["project no longer supports the prefixed browser"]
+    },
+    {
+      "id": "css-state-contrast-parity",
+      "family": "stylesheet",
+      "trigger_signals": ["hover", "selected", "active", "disabled", "dark/light theme"],
+      "generic_invariant": "State-specific colors must preserve contrast and semantic distinction across all themes.",
+      "questions": ["Can hover and selected become indistinguishable?", "Does disabled text fall below readability threshold?"],
+      "evidence_to_collect": ["state selectors", "theme variants", "computed colors", "visual regression"],
+      "common_false_positives": ["component is decorative and non-interactive"]
+    },
+    {
+      "id": "template-renderability",
+      "family": "template-i18n",
+      "trigger_signals": ["ERB", "Jinja", "Handlebars", "template branch", "inline conditional"],
+      "generic_invariant": "Changed templates must remain syntactically renderable in every branch.",
+      "questions": ["Did a conditional or closing tag use invalid template syntax?", "Is the branch covered by template rendering tests?"],
+      "evidence_to_collect": ["template syntax", "render path", "branch condition", "test coverage"],
+      "common_false_positives": ["template preprocessor rewrites the syntax before render"]
+    },
+    {
+      "id": "i18n-pluralization-fallback",
+      "family": "template-i18n",
+      "trigger_signals": ["locale fallback", "plural", "translation key", "missing translation", "I18n.t"],
+      "generic_invariant": "Locale fallback and pluralization must preserve key shape, count semantics, and missing-key behavior.",
+      "questions": ["Can fallback hide missing plural variants?", "Do locale files load for every execution context, not just controllers?"],
+      "evidence_to_collect": ["translation lookup", "fallback load path", "pluralization rule", "non-controller caller"],
+      "common_false_positives": ["framework handles fallback and pluralization centrally"]
+    },
+    {
+      "id": "i18n-locale-cache-thread-safety",
+      "family": "template-i18n",
+      "trigger_signals": ["loaded locales", "locale cache", "default locale", "fallback locale", "thread"],
+      "generic_invariant": "Locale caches must be thread-safe and invalidate when locale configuration changes.",
+      "questions": ["Can one thread see partial loaded locale state?", "Does changing default locale leave stale fallback data?"],
+      "evidence_to_collect": ["cache variable", "lock", "configuration change event", "load key type"],
+      "common_false_positives": ["locale configuration is immutable after boot"]
+    },
+    {
+      "id": "helper-runtime-option-dispatch",
+      "family": "runtime-dispatch",
+      "trigger_signals": ["options", "allow_animation", "binary mode", "platform", "feature flag", "helper branch"],
+      "generic_invariant": "Wrappers and helpers must honor runtime options in every dispatch branch.",
+      "questions": ["Does an option select a tool/API with different argument semantics?", "Are fallback branches updated along with the main branch?"],
+      "evidence_to_collect": ["option parsing", "dispatch branch", "target API contract", "tests by option"],
+      "common_false_positives": ["option is dead or fixed by configuration"]
+    },
+    {
+      "id": "helper-wrapper-override-signature",
+      "family": "runtime-dispatch",
+      "trigger_signals": ["override", "wrapper method", "polymorphic call", "super", "adapter"],
+      "generic_invariant": "Overrides and wrappers must preserve expected signatures, return values, and side effects.",
+      "questions": ["Does caller dispatch to override at runtime?", "Did wrapper drop parameters or change return type?"],
+      "evidence_to_collect": ["base signature", "override signature", "dispatch site", "callers"],
+      "common_false_positives": ["override is never registered or selected for the affected type"]
+    },
+    {
+      "id": "helper-platform-binary-args",
+      "family": "runtime-dispatch",
+      "trigger_signals": ["external binary", "shell command", "gifsicle", "imagemagick", "platform-specific"],
+      "generic_invariant": "Arguments passed to external tools must match that tool's syntax for the selected branch and platform.",
+      "questions": ["Does one branch pass percentages where WxH is required?", "Are shell arguments escaped and ordered correctly?"],
+      "evidence_to_collect": ["command construction", "tool docs or existing usage", "branch condition", "tests"],
+      "common_false_positives": ["wrapper library normalizes arguments before execution"]
+    },
+    {
+      "id": "test-name-contract-mismatch",
+      "family": "testing",
+      "trigger_signals": ["test name", "comment says", "asserts different", "empty array", "empty dict"],
+      "generic_invariant": "Test names and comments should describe the behavior actually asserted when they guide future maintenance.",
+      "questions": ["Does the test cover the behavior it claims?", "Would a future maintainer infer the wrong contract?"],
+      "evidence_to_collect": ["test name", "assertions", "fixture shape", "production contract"],
+      "common_false_positives": ["mismatch is cosmetic and no product behavior depends on it"]
+    },
+    {
+      "id": "test-implementation-mirroring",
+      "family": "testing",
+      "trigger_signals": ["new tests", "same algorithm", "mocked implementation", "snapshot only", "AI generated test"],
+      "generic_invariant": "Tests should assert externally meaningful behavior, not duplicate implementation details.",
+      "questions": ["Would the test fail if the implementation were wrong in the same way?", "Are edge cases and failure modes represented?"],
+      "evidence_to_collect": ["test assertions", "implementation logic", "edge-case fixture", "failure-mode fixture"],
+      "common_false_positives": ["unit is intentionally a pure algorithm with known golden outputs"]
+    },
+    {
+      "id": "test-sentinel-fixture-coverage",
+      "family": "testing",
+      "trigger_signals": ["sentinel value", "empty string", "null fixture", "boundary fixture", "factory default"],
+      "generic_invariant": "Fixtures should include sentinel values that exercise newly changed branches.",
+      "questions": ["Does new logic have a branch only triggered by null/empty/zero?", "Do factories hide the missing state?"],
+      "evidence_to_collect": ["changed branch", "fixtures", "factory defaults", "negative tests"],
+      "common_false_positives": ["branch is impossible due upstream type system or validation"]
+    },
+    {
+      "id": "db-transaction-partial-write",
+      "family": "database",
+      "trigger_signals": ["create then update", "multiple tables", "transaction", "after save", "external side effect"],
+      "generic_invariant": "Multi-step data mutations must define atomicity and recovery for partial writes.",
+      "questions": ["Can first write commit before later failure?", "Are external side effects inside or outside the transaction intentionally?"],
+      "evidence_to_collect": ["transaction boundary", "write sequence", "error handling", "reconciliation job"],
+      "common_false_positives": ["operation is explicitly best-effort and idempotent"]
+    },
+    {
+      "id": "db-affected-rows-semantics",
+      "family": "database",
+      "trigger_signals": ["affected rows", "Exec", "row count", "delete", "update result"],
+      "generic_invariant": "Database result semantics must match the driver/ORM contract used at runtime.",
+      "questions": ["Does the driver return affected rows or last insert ID?", "Is zero rows success, no-op, or error?"],
+      "evidence_to_collect": ["driver method contract", "call site", "error/no-op handling", "tests"],
+      "common_false_positives": ["wrapper normalizes result semantics before caller sees it"]
+    },
+    {
+      "id": "db-sql-expression-injection",
+      "family": "database",
+      "trigger_signals": ["raw SQL", "expression builder", "order by", "where clause", "format string"],
+      "generic_invariant": "User-controlled values must not enter SQL identifiers or expressions without strict allowlisting.",
+      "questions": ["Are parameters bound only for values while identifiers remain interpolated?", "Can sort/filter expression select arbitrary SQL?"],
+      "evidence_to_collect": ["input source", "SQL construction", "parameter binding", "allowlist"],
+      "common_false_positives": ["input is selected from a closed enum before interpolation"]
+    },
+    {
+      "id": "observability-log-metric-tag-parity",
+      "family": "observability",
+      "trigger_signals": ["log field", "metric tag", "shard", "duration", "error counter", "rename"],
+      "generic_invariant": "Log and metric fields must preserve downstream query contracts or migrate them deliberately.",
+      "questions": ["Did a tag rename split dashboards or alerts?", "Do success and error paths emit comparable fields?"],
+      "evidence_to_collect": ["old emission", "new emission", "dashboards/alerts", "tests"],
+      "common_false_positives": ["telemetry is intentionally new and no consumers exist"]
+    },
+    {
+      "id": "observability-cardinality-budget",
+      "family": "observability",
+      "trigger_signals": ["label", "tag", "user id", "request id", "path", "metric dimension"],
+      "generic_invariant": "Metrics must not add unbounded or sensitive labels unless backend budget and privacy allow it.",
+      "questions": ["Can label cardinality grow per user/request/object?", "Does label expose secrets or identifiers?"],
+      "evidence_to_collect": ["metric label source", "cardinality bound", "privacy policy", "backend limit"],
+      "common_false_positives": ["label is sampled log field, not metric dimension"]
+    },
+    {
+      "id": "security-secret-redaction",
+      "family": "security",
+      "trigger_signals": ["log token", "Authorization", "secret", "API key", "debug output"],
+      "generic_invariant": "Secrets must be redacted before logs, errors, analytics, or review comments.",
+      "questions": ["Can exceptions include request headers or raw config?", "Do debug logs run in production?"],
+      "evidence_to_collect": ["secret source", "logging path", "redaction helper", "environment gating"],
+      "common_false_positives": ["value is a non-secret public identifier"]
+    },
+    {
+      "id": "security-path-traversal-archive",
+      "family": "security",
+      "trigger_signals": ["extract archive", "zip", "tar", "join path", "upload filename", "../"],
+      "generic_invariant": "File paths derived from archives or uploads must stay inside the intended root after canonicalization.",
+      "questions": ["Can absolute paths, dot-dot, symlinks, or Windows separators escape?", "Are writes checked after resolving symlinks?"],
+      "evidence_to_collect": ["path join", "canonicalization", "write call", "symlink handling"],
+      "common_false_positives": ["archive library strips unsafe paths and is tested"]
+    },
+    {
+      "id": "security-cors-csp-header-parity",
+      "family": "security",
+      "trigger_signals": ["CORS", "CSP", "headers", "allowed origin", "frame policy"],
+      "generic_invariant": "Security headers must be generated consistently across routes, errors, and alternate render paths.",
+      "questions": ["Can error responses omit security headers?", "Does dynamic origin reflection include credentials unsafely?"],
+      "evidence_to_collect": ["header middleware", "route-specific override", "error handler", "tests"],
+      "common_false_positives": ["headers are injected by an upstream proxy for all responses"]
+    },
+    {
+      "id": "security-html-sanitizer-locale",
+      "family": "security",
+      "trigger_signals": ["sanitize", "HTML", "translation", "locale file", "safe string"],
+      "generic_invariant": "Sanitized HTML and localized content must preserve the same trust contract in every locale.",
+      "questions": ["Can translation introduce tags or attributes not allowed in the source locale?", "Is safe-marking applied before or after interpolation?"],
+      "evidence_to_collect": ["sanitizer config", "translation values", "safe string helper", "render sink"],
+      "common_false_positives": ["translation system escapes all interpolations at render"]
+    },
+    {
+      "id": "resource-upload-magic-content",
+      "family": "resource-safety",
+      "trigger_signals": ["file upload", "extension", "MIME", "image processing", "attachment"],
+      "generic_invariant": "Upload validation should consider magic bytes, declared type, extension, and decoder behavior together.",
+      "questions": ["Can extension choose a decoder inconsistent with content?", "Can polyglot files bypass validation?"],
+      "evidence_to_collect": ["upload validator", "content sniffing", "decoder dispatch", "storage metadata"],
+      "common_false_positives": ["trusted upstream scanner rewrites and validates files before app code"]
+    },
+    {
+      "id": "resource-decompression-bomb",
+      "family": "resource-safety",
+      "trigger_signals": ["decompress", "zip", "gzip", "image resize", "archive import", "untrusted file"],
+      "generic_invariant": "Processing compressed or encoded content needs limits on expanded size, dimensions, and work factor.",
+      "questions": ["Can small input expand to huge memory/disk usage?", "Do image dimensions exceed safe decoder limits?"],
+      "evidence_to_collect": ["expanded size limits", "dimension checks", "streaming mode", "failure handling"],
+      "common_false_positives": ["processing happens in a sandbox with strict resource quotas"]
+    },
+    {
+      "id": "resource-tempfile-cleanup",
+      "family": "resource-safety",
+      "trigger_signals": ["temp file", "temporary directory", "download then process", "cleanup", "defer"],
+      "generic_invariant": "Temporary resources must be cleaned up on success, failure, and cancellation.",
+      "questions": ["Can exceptions skip cleanup?", "Can cleanup race with async consumers still reading the file?"],
+      "evidence_to_collect": ["allocation site", "cleanup path", "exception path", "async handoff"],
+      "common_false_positives": ["temp directory is lifecycle-scoped and swept by an external worker"]
+    },
+    {
+      "id": "architecture-similar-pattern-consistency",
+      "family": "architecture",
+      "trigger_signals": ["new helper", "new service", "similar existing code", "pattern", "migration"],
+      "generic_invariant": "New code solving an existing problem should match established local patterns or explain the deviation.",
+      "questions": ["Is there an existing helper that handles edge cases the new code misses?", "Does deviation create a second source of truth?"],
+      "evidence_to_collect": ["nearby analogs", "new implementation", "edge-case handling", "tests"],
+      "common_false_positives": ["new pattern is intentionally introduced and consistently adopted"]
+    },
+    {
+      "id": "architecture-incomplete-migration",
+      "family": "architecture",
+      "trigger_signals": ["migration", "rename", "old path", "new path", "deprecate", "mixed state"],
+      "generic_invariant": "Partial migrations must preserve interoperability until all readers and writers are moved.",
+      "questions": ["Can old and new formats coexist?", "Are all call sites, tests, docs, and config references migrated?"],
+      "evidence_to_collect": ["old path references", "new path references", "compat layer", "rollout plan"],
+      "common_false_positives": ["change is atomic within a monorepo deploy boundary"]
+    },
+    {
+      "id": "architecture-removed-code-referenced",
+      "family": "architecture",
+      "trigger_signals": ["delete function", "remove config", "rename file", "drop export", "dead path"],
+      "generic_invariant": "Removed or renamed public symbols must have all dynamic and static references updated.",
+      "questions": ["Are dynamic string references searched?", "Do tests or docs still invoke removed names?"],
+      "evidence_to_collect": ["removed symbol", "static references", "dynamic registry", "public API docs"],
+      "common_false_positives": ["symbol was private and only referenced in deleted code"]
+    },
+    {
+      "id": "architecture-config-doc-dual-source",
+      "family": "architecture",
+      "trigger_signals": ["config", "docs", "default", "environment variable", "settings UI"],
+      "generic_invariant": "Configuration defaults and docs should not diverge from runtime behavior.",
+      "questions": ["Does docs/config/schema/UI default all agree?", "Can old environment variables silently override new names?"],
+      "evidence_to_collect": ["runtime default", "schema", "docs", "UI", "migration alias"],
+      "common_false_positives": ["docs are generated from runtime schema in CI"]
+    },
+    {
+      "id": "ai-code-hallucinated-api",
+      "family": "ai-code",
+      "trigger_signals": ["new import", "new API call", "generated code", "unusual abstraction", "missing module"],
+      "generic_invariant": "New API, module, and method references must exist and match the installed dependency versions.",
+      "questions": ["Does the imported symbol exist in this version?", "Did code invent a method name that resembles docs from another ecosystem?"],
+      "evidence_to_collect": ["dependency version", "import target", "API docs or local type", "runtime tests"],
+      "common_false_positives": ["symbol is generated at build time and present in generated sources"]
+    },
+    {
+      "id": "ai-code-overgeneralized-abstraction",
+      "family": "ai-code",
+      "trigger_signals": ["generic manager", "unneeded interface", "factory", "excessive indirection", "generated"],
+      "generic_invariant": "Abstractions should remove real duplication or encode a real boundary, not obscure simple behavior.",
+      "questions": ["Does abstraction hide important domain constraints?", "Are new extension points unused and untested?"],
+      "evidence_to_collect": ["call sites", "variants supported", "domain constraints", "tests"],
+      "common_false_positives": ["abstraction is required by a framework or near-term migration already in progress"]
+    }
+  ]
+}

@@ -16,6 +16,19 @@ Not "is the code correct?" — that's the dev lens. Not "is it safe?" —
 that's security. This lens asks whether the entire direction of effort
 is justified.
 
+## Evidence requirement
+
+A research verdict must cite evidence gathered outside the diff: the linked
+issue or PR discussion, `git log` of the affected files, or the actual data
+the code processes. If the review contains no such citation, the research
+pass is not done — "the approach seems reasonable" derived from the diff
+alone is exactly the shallow review this lens exists to prevent.
+
+Per-scope research builds on the Pass 1b problem-fit verdict: examine only
+the assumptions local to this scope. Direction-level concerns (wrong
+problem, wrong approach) are raised once — in Pass 1b or Pass 3 — and never
+repeated in every scope.
+
 ## Problem framing
 
 - What problem does this PR claim to solve?

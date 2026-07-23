@@ -1,0 +1,294 @@
+{
+  "updated_at": "2026-07-16",
+  "note": "Curated review-lab triage for still-missed PR-AF goldens. These annotations are reviewer-facing experiment metadata, not benchmark goldens.",
+  "misses": [
+    {
+      "case_id": "discourse-commit-267d8be1f5",
+      "golden_id": "G1",
+      "category": "weak-golden",
+      "assessment": "Do not tune main reviewer",
+      "next_action": "Do not optimize for predicate naming/string-literal style without proving framework/runtime impact.",
+      "note": "A clean auth-only/no-skill commit review scanned clean and found stronger source-backed defects: TL0 anonymous website_name leakage, port stripping, and case-sensitive host matching. The expected row is target-evidenced but focuses on include_website_name naming and '.' << website_host style; nearby source has some non-question-mark include methods, and Ruby non-frozen string literals are fresh objects."
+    },
+    {
+      "case_id": "discourse-commit-5f8a130277",
+      "golden_id": "G1",
+      "category": "low-value-side-effect",
+      "assessment": "Do not tune main reviewer",
+      "next_action": "Do not optimize for match-count side effects unless reviewer scope explicitly includes telemetry/stat counters.",
+      "note": "A clean auth-only/no-skill commit review scanned clean and found a stronger exact-string block bypass plus missing non-English locale key. The expected row is target-evidenced but focuses on BlockedEmail.should_block? updating match_count/last_match_at during validation, which appears to be intended blocked-email telemetry and is low-impact compared with block bypass."
+    },
+    {
+      "case_id": "discourse-commit-5f8a130277",
+      "golden_id": "G2",
+      "category": "imprecise-golden",
+      "assessment": "Source-backed disagreement",
+      "next_action": "Track unanchored email-domain regex as a generic validation concern, but do not force the subdomain example without source proof.",
+      "note": "The regex is unanchored after the configured domain, so a suffix such as user@example.com.evil is plausible; however the golden's example user@evil.example.com does not follow from Regexp.new('@(example\\\\.com)'), which requires @ immediately before example.com. Target alignment is weak and the clean review found stronger source-backed validation defects."
+    },
+    {
+      "case_id": "discourse-commit-6669a2d94d",
+      "golden_id": "G2",
+      "category": "low-value-style",
+      "assessment": "Do not tune main reviewer",
+      "next_action": "Leave as benchmark-only property spelling row.",
+      "note": "The clean auth-only/no-skill review mentioned stopNotificiationsText and rejected it as a defect because the producer and consumer use the same misspelled property name; the same run hit the high-value nil TopicUser crash."
+    },
+    {
+      "case_id": "discourse-commit-060cda7772",
+      "golden_id": "G3",
+      "category": "low-value-test-contract",
+      "assessment": "Source-backed test mismatch",
+      "next_action": "Keep test-method mismatch as a secondary test-contract concern, not a main reviewer tuning target.",
+      "note": "Routes map DELETE /admin/groups/:id/members to remove_member and PUT to add_members; one automatic-group controller spec uses xhr :put, so it does not exercise remove_member. The clean run hit the higher-value async member-load and pagination defects and treated runtime JS/routes as lined up because removeMember uses DELETE."
+    },
+    {
+      "case_id": "cal_dot_com-10967",
+      "golden_id": "G2",
+      "category": "low-value-style",
+      "assessment": "Do not tune main reviewer",
+      "next_action": "Leave as benchmark-only style row unless user wants style recall.",
+      "note": "Redundant optional chaining is target-evidenced but not a meaningful review-quality miss. A clean auth-only/no-skill adapter-routing pass with 22/22 files and 58/58 hunks mapped also skipped it while finding higher-impact calendar issues."
+    },
+    {
+      "case_id": "cal_dot_com-10967",
+      "golden_id": "G3",
+      "category": "imprecise-golden",
+      "assessment": "Source-backed disagreement",
+      "next_action": "Do not force; document missing-ID fallback as the real routing defect.",
+      "note": "The target bug traced by source is the absent externalCalendarId fallback path, while the golden describes the provided-ID branch. A clean auth-only/no-skill adapter-routing pass independently found the missing-ID fallback and was judged 1/5, reinforcing this as an imprecise expected row rather than a prompt-specific miss."
+    },
+    {
+      "case_id": "cal_dot_com-14740",
+      "golden_id": "G5",
+      "category": "source-rejected-low-value",
+      "assessment": "Source-backed non-finding",
+      "next_action": "Do not tune unless explicitly optimizing low-severity UI-placeholder recall.",
+      "note": "Normal dialog validation prevents the [\"\"] placeholder from reaching the mutation payload: AddGuestsDialog defines a local z.array(z.string().email()) schema, safeParse([\"\"]) fails, and handleAdd only calls mutate on validation success."
+    },
+    {
+      "case_id": "grafana-79265",
+      "golden_id": "G3",
+      "category": "contradicted-golden",
+      "assessment": "Source-backed contradiction",
+      "next_action": "Do not tune; xorm Session.Exec accepts sqlOrArgs ...any and the target package compiles.",
+      "note": "Target DBSession embeds xorm.Session; pkg/util/xorm/session_raw.go defines Exec(sqlOrArgs ...any), and go test ./pkg/services/anonymous/anonimpl/anonstore passes."
+    },
+    {
+      "case_id": "grafana-79265",
+      "golden_id": "G5",
+      "category": "contradicted-golden",
+      "assessment": "Source-backed contradiction",
+      "next_action": "Do not tune; the cited update window normalizes both bounds through device.UpdatedAt.UTC().",
+      "note": "Target updateDevice uses device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration) and device.UpdatedAt.UTC().Add(time.Minute), not a mixed UTC/local current-time bound."
+    },
+    {
+      "case_id": "keycloak-32918",
+      "golden_id": "G1",
+      "category": "overbroad-golden",
+      "assessment": "Source-backed disagreement",
+      "next_action": "Do not force recursive framing; keep cache-provider re-entry as a documented risk pattern.",
+      "note": "Multiple passes, including a clean auth-only/no-skill Graphify pass with 4/4 files and 12/12 hunks mapped, found stale-cache issues but traced session.identityProviders().getById(id) as single-ID cache re-entry, not recursive list loading."
+    },
+    {
+      "case_id": "keycloak-37429",
+      "golden_id": "G4",
+      "category": "low-value-style",
+      "assessment": "Do not tune main reviewer",
+      "next_action": "Leave as benchmark-only spelling nit.",
+      "note": "Private helper misspelling does not affect behavior."
+    },
+    {
+      "case_id": "keycloak-41249",
+      "golden_id": "G2",
+      "category": "contradicted-golden",
+      "assessment": "Source-backed contradiction",
+      "next_action": "Do not tune; keep contradiction in remaining-miss report.",
+      "note": "Target helper explicitly allows currentUser == null: UsernamePasswordForm.isConditionalPasskeysEnabled returns true when currentUser == null and the authenticate/challenge paths call webauthnAuth.fillContextForm when that helper is true."
+    },
+    {
+      "case_id": "sentry-67876",
+      "golden_id": "G1",
+      "category": "imprecise-golden",
+      "assessment": "Source-backed disagreement",
+      "next_action": "Do not report a null reference unless a throwing path is proven.",
+      "note": "Pipeline.fetch_state returns None for missing state; the source-backed exception path is missing metadata sender, already hit by other passes. A clean auth-only/no-skill state-completeness pass scanned clean and still scored 2/3, finding the delayed-webhook bypass while missing only this narrower null-ref wording."
+    },
+    {
+      "case_id": "sentry-92393",
+      "golden_id": "G1",
+      "category": "misattached-or-stale",
+      "assessment": "Manual adjudication needed",
+      "next_action": "Confirm benchmark target before any more review runs.",
+      "note": "Target alignment and clustered Graphify coverage both point to a spans-buffer PR surface, not the optimized paginator negative-offset branch; patch_identifier_score and target_identifier_score are both 0.0."
+    },
+    {
+      "case_id": "sentry-92393",
+      "golden_id": "G2",
+      "category": "misattached-or-stale",
+      "assessment": "Manual adjudication needed",
+      "next_action": "Confirm benchmark target before any more review runs.",
+      "note": "Target alignment and clustered Graphify coverage both point to a spans-buffer PR surface, not the base paginator negative-offset branch; patch_identifier_score and target_identifier_score are both 0.0."
+    },
+    {
+      "case_id": "sentry-92393",
+      "golden_id": "G3",
+      "category": "misattached-or-stale",
+      "assessment": "Manual adjudication needed",
+      "next_action": "Confirm benchmark target before any more review runs.",
+      "note": "Target alignment and clustered Graphify coverage both point to a spans-buffer PR surface, not the datetime floor/ceil paginator key path; patch_identifier_score and target_identifier_score are both 0.0."
+    },
+    {
+      "case_id": "sentry-94376",
+      "golden_id": "G2",
+      "category": "weak-golden",
+      "assessment": "Source-backed non-finding so far",
+      "next_action": "Do not report cache invalidation without changed source constructing/deleting the key.",
+      "note": "Multiple passes found no changed hash-based cache key/invalidation path. A clean auth-only/no-skill data/cache pass scanned clean, scored 2/3, and explicitly rejected this row because the patch does not introduce a cache writer/delete path. Direct search of the changed patch/helper/endpoint paths finds allowlist checks but no hash(), cache writer, or invalidation code."
+    },
+    {
+      "case_id": "sentry-95633",
+      "golden_id": "G1",
+      "category": "stale-golden",
+      "assessment": "Source-backed contradiction",
+      "next_action": "Do not tune; target repo requires Python 3.13 where Queue.shutdown exists.",
+      "note": "pyproject/setup/devenv all target Python 3.13. A clean auth-only/no-skill queue/test-contract pass scanned clean and explicitly rejected this row after checking Queue.shutdown/queue.ShutDown availability."
+    },
+    {
+      "case_id": "sentry-95633",
+      "golden_id": "G2",
+      "category": "low-value-test-style",
+      "assessment": "Do not tune main reviewer",
+      "next_action": "Leave as benchmark-only maintainability comment.",
+      "note": "Repeated max_wait literal in tests is not a review-quality target. The clean queue/test-contract pass instead found source-backed graceful-shutdown, commit-order, enqueue-after-shutdown, unbounded-queue, and test-contract issues."
+    },
+    {
+      "case_id": "discourse-commit-4f8aed295a",
+      "golden_id": "G1",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "Add generic remote-fetch review obligations for changed open/URI calls: validate scheme, host allowlist, internal/private network access, redirect behavior, and timeout/error handling.",
+      "note": "Clean no-plugins Graphify run scanned clean and missed the critical SSRF in TopicEmbed.import_remote open(url). The source excerpt and symbol pack include the open(url).read call, but the reviewer focused on raw HTML import XSS instead of remote-fetch trust boundaries."
+    },
+    {
+      "case_id": "discourse-commit-4f8aed295a",
+      "golden_id": "G2",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "Strengthen postMessage/origin obligations: require exact origin parsing/comparison, forbid substring indexOf checks for security boundaries, and test sibling-domain/port/scheme variants.",
+      "note": "Clean no-plugins run missed app/assets/javascripts/embed.js using discourseUrl.indexOf(e.origin) for origin validation. The reviewer covered postMessage generally but did not challenge substring origin matching."
+    },
+    {
+      "case_id": "discourse-commit-4f8aed295a",
+      "golden_id": "G3",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "For postMessage changes, explicitly check both receiver origin validation and sender targetOrigin semantics; targetOrigin must be an origin, not a full URL.",
+      "note": "Clean no-plugins run noticed request.referer interpolation in parent.postMessage but framed it as JS injection. It missed the targetOrigin contract bug: full referrer URL causes browser message delivery to fail, breaking iframe resizing."
+    },
+    {
+      "case_id": "discourse-commit-4f8aed295a",
+      "golden_id": "G4",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "Add framing/clickjacking obligations for embed endpoints: audit X-Frame-Options/CSP frame-ancestors, referer reliance, nil/malformed referer behavior, and browser-enforced alternatives.",
+      "note": "Clean no-plugins run missed EmbedController#ensure_embeddable setting X-Frame-Options ALLOWALL while relying on referer host validation. It found adjacent referer reflection risk but did not evaluate the framing trust model."
+    },
+    {
+      "case_id": "discourse-commit-4f8aed295a",
+      "golden_id": "G5",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "When a reviewer finds one injection/raw-html path, require checking nearby string interpolation and nil/empty inputs in the same helper before finalizing.",
+      "note": "Clean no-plugins run found raw HTML import XSS, but missed TopicEmbed.import appending to possibly nil contents and interpolating url directly into an HTML href/body. This is a near miss caused by stopping after the broader raw_html finding."
+    },
+    {
+      "case_id": "discourse-commit-4f8aed295a",
+      "golden_id": "G6",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "Add a generic template syntax pass for new/changed ERB/JS template files, including block delimiters and compile/render sanity checks.",
+      "note": "Clean no-plugins run did not inspect app/views/embed/best.html.erb deeply enough to catch '<%- end if %>'. The source is target-evidenced and would break render/compile, so this is a real review-depth miss."
+    },
+    {
+      "case_id": "discourse-commit-d1c69189f3",
+      "golden_id": "G1",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "Strengthen nil/blank mutation checks around model callbacks: before_validation blocks that call mutating methods need nil/blank inputs exercised, especially when admin UI can create new rows.",
+      "note": "Clean no-plugins Graphify run scanned clean and missed EmbeddableHost#before_validation calling self.host.sub! when host is nil. The run found a different migration nil crash, so this is a nearby nil-contract miss rather than a benchmark-quality dispute."
+    },
+    {
+      "case_id": "discourse-commit-d1c69189f3",
+      "golden_id": "G2",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "For admin CRUD controllers, require not-found handling on every find-by-id before update/destroy helper calls, not just happy-path save validation.",
+      "note": "Clean no-plugins run missed Admin::EmbeddableHostsController update/destroy dereferencing nil when EmbeddableHost.where(id: params[:id]).first returns no row. The source excerpt included both actions and the save_host helper."
+    },
+    {
+      "case_id": "discourse-commit-d1c69189f3",
+      "golden_id": "G3",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "For case-insensitive DB predicates, require checking both sides of the comparison; lower(column) must be paired with a lowercased parameter or case-insensitive DB operator.",
+      "note": "Clean no-plugins run found the host-with-port mismatch in record_for_host but missed the adjacent case-normalization defect: where('lower(host) = ?', host) compares a lowered column to an unlowered URI host."
+    },
+    {
+      "case_id": "discourse-commit-d1c69189f3",
+      "golden_id": "G4",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "For migrations that bypass models with raw SQL, require parity checks against model normalization/validation callbacks before deleting legacy settings.",
+      "note": "Clean no-plugins run found a migrated-host port mismatch and category migration nil crash, but missed raw SQL inserting legacy embeddable_hosts values without applying EmbeddableHost normalization for schemes and paths."
+    },
+    {
+      "case_id": "discourse-commit-ffbaf8c542",
+      "golden_id": "G3",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "For wrapper/helper signature changes, trace each downstream implementation selected by runtime options, not only the default command path.",
+      "note": "Clean no-plugins run scored 2/3 and found the duplicate Ruby downsize override plus client/server size-policy drift, but missed the animated GIF branch where allow_animation selects gifsicle --resize-fit and the new '80%' dimensions argument is not valid WxH geometry."
+    },
+    {
+      "case_id": "discourse-commit-d38c4d5f74",
+      "golden_id": "G3",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "For large mechanical stylesheet changes, group selectors by old/new lightness pairs and audit outliers where the light-theme branch reverses direction.",
+      "note": "Clean no-plugins SCSS pass scored 2/3 and found several concrete contrast regressions, but missed one topic-post selector where the light branch changed from 70% to 30%, making text darker rather than adapting only the dark branch."
+    },
+    {
+      "case_id": "discourse-commit-ecfa17b5a7",
+      "golden_id": "G1",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "For lazy singleton state, audit both synchronization around the state container and duplicate work/races around check-then-act paths.",
+      "note": "Clean no-plugins i18n pass found fallback cache/load issues but missed the lower-level @loaded_locales thread-safety risk in the lazy load tracker. The source uses shared mutable locale-load state around a mutex-protected loader, so this is source-backed but lower priority than user-visible fallback failures."
+    },
+    {
+      "case_id": "discourse-commit-ecfa17b5a7",
+      "golden_id": "G2",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "For cache/load tracking keyed by names, verify canonical key normalization across String/Symbol/locale-code variants before membership tests.",
+      "note": "Clean no-plugins i18n pass missed String vs Symbol locale identity in @loaded_locales and fallback lists. The code compares include?(locale) directly and builds fallback arrays with symbols, so duplicate loading or inconsistent cache/load state is plausible."
+    },
+    {
+      "case_id": "discourse-commit-5b229316ee",
+      "golden_id": "G1",
+      "category": "source-backed-miss",
+      "assessment": "Prompt/context robustness gap",
+      "next_action": "For layout migrations from float/inline-block to flex, audit legacy and no-JS/noscript DOM variants in addition to the primary flex container.",
+      "note": "Clean no-plugins flexbox pass found header overflow and small-action flex regressions, but missed that removing float:right from .d-header .panel can break non-Ember/noscript header markup where the panel is not a flex item."
+    },
+    {
+      "case_id": "discourse-commit-5b229316ee",
+      "golden_id": "G2",
+      "category": "low-value-style",
+      "assessment": "Do not tune main reviewer",
+      "next_action": "Do not optimize for redundant invalid CSS declarations when the valid legacy declaration is already emitted.",
+      "note": "The mixin emits the correct -ms-flex-align immediately before the invalid -ms-align-items declaration. Browsers ignore the invalid property, so this is CSS hygiene rather than a behavior-affecting compatibility miss."
+    }
+  ]
+}
