@@ -14,8 +14,37 @@ Structured markdown that works in three contexts:
 **Author:** {author} | **Base:** {base} → **Head:** {head} @ {short_sha}
 **Files changed:** {count} | **+{additions}** | **-{deletions}**
 **Review round:** {n} — prior rounds: r1 {date} @ {sha} (omit this line on round 1)
+**Description↔head:** {in sync | provenance finding | unavailable reason}
+
+## Coverage Ledger
+
+| File | Read status | Scope | Evidence or not-opened reason |
+| --- | --- | --- | --- |
+| `{path}` | reviewed | 1 | full file opened |
+| `{path}` | targeted-read | 2 | `{symbols or hunks}` |
+| `{path}` | not-opened | — | `{reason}` |
+
+**Coverage:** {reviewed}/{changed} files reviewed, {targeted} targeted-read, {not_opened} not-opened — {percent}% of changed lines read
+
+For more than about 60 files, group rows by directory with reviewed,
+targeted-read, and not-opened counts. Keep individual rows for not-opened files
+that carry runtime risk. The totals line remains mandatory.
+
+---
 
 {PR description summary — 1-2 sentences}
+
+---
+
+## Body Claims
+
+| Claim from PR body/title | Head evidence | Status |
+| --- | --- | --- |
+| {verbatim falsifiable claim} | `{path}:{line}` | verified |
+| {verbatim falsifiable claim} | `{reversing commit}` | CONTRADICTED |
+
+Carry this table across rounds. Step 0g owns SHA pins, commit counts, trailers,
+and check-run status; keep all other assertion-shaped code and quantity claims.
 
 ---
 
@@ -27,6 +56,10 @@ Structured markdown that works in three contexts:
 | 2   | {name} | {file list} | Dev, Research | refactor | 0.30 | 8     |
 
 (Omit Risk and Flows columns if code-review-graph is not available.)
+
+Every changed file must appear in exactly one scope or in the Coverage Ledger
+as not-opened with a reason. For each non-Dev lens, record either its assignment
+or a per-scope decline with the reason.
 
 ---
 
@@ -205,6 +238,8 @@ by people who never saw the rest of the review. For those sections:
 - The Findings Ledger is cumulative across rounds — never delete a row, only
   update its Status
 - A ready-to-post GitHub comment containing only Short version, Questions, and
-  Recommendations, signed `Codex on behalf of Sasha`, is written to
+  Recommendations is signed `<driver> on behalf of <repo owner>`, using the
+  agent that actually ran the review. If the driver is unknown, use `Automated
+  review on behalf of <repo owner>`. Write it to
   `~/reviews/<repo>/PR-<N>/<short-sha>-comment.md`
 ````

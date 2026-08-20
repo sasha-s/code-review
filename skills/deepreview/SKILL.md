@@ -27,7 +27,19 @@ Accept a PR number or full GitHub URL. Resolve against the current repo.
 gh auth status
 
 # Fetch PR metadata
-gh pr view <N> --json title,body,author,baseRefName,headRefName,additions,deletions,changedFiles,url,state,mergeCommit
+gh pr view <N> --json title,body,author,baseRefName,headRefName,additions,deletions,changedFiles,url,state,mergeCommit,commits
+
+# Body edit time drives the Step 0g provenance check and is NOT exposed by
+# `gh pr view`. Fetch it explicitly; when null, fall back to `createdAt`.
+# Fetch AUTHORED dates too: `gh pr view --json commits` reports `committedDate`,
+# which a rebase rewrites to the rebase time on every commit. Step 0g must
+# compare against `authoredDate`. (Measured: 34.3% of PRs here carry rebased or
+# amended commits, and 15.1% get a wrong post-body commit count from
+# `committedDate` — one reports 64 commits against a true 39.)
+gh api graphql -f query='{repository(owner:"<OWNER>",name:"<REPO>"){
+  pullRequest(number:<N>){ createdAt lastEditedAt
+    commits(first:250){nodes{commit{oid authoredDate committedDate
+      messageHeadline messageBody}}}}}}'
 
 # Fetch the diff
 gh pr diff <N>
@@ -83,7 +95,7 @@ Before Pass 0, check whether this PR has been reviewed before:
 
 ```bash
 REPO_NAME="$(basename "$(git rev-parse --show-toplevel)")"
-REVIEW_DIR="$HOME/reviews/${REPO_NAME}/PR-<N>"
+REVIEW_DIR="${DEEPREVIEW_REVIEW_DIR:-$HOME/reviews/${REPO_NAME}}/PR-<N>"
 ls -t "${REVIEW_DIR}"/*.md 2>/dev/null | grep -v -- '-comment.md'
 # Legacy fallback: older reviews may live in-repo at reviews/PR-<N>.md
 ```
@@ -112,16 +124,139 @@ Re-review rules (these override the normal pass instructions):
    new head and mark it `resolved`, `still-open`, or `obsolete` — citing the
    commit or author comment that settles it. Author replies in PR comments
    count as answers to prior Questions.
-2. **Review only the delta.** Run the passes on the incremental diff plus any
-   code an open finding points at. Do not re-derive findings on unchanged
-   code; an unchanged scope gets one line ("unchanged since round {k}").
-3. **Never restate.** A prior question or recommendation may reappear only if
+2. **Review only the delta — with two mandatory exceptions.** Run the passes on
+   the incremental diff plus any code an open finding points at. Do not
+   re-derive findings on unchanged code; an unchanged scope gets one line
+   ("unchanged since round {k}"). **Except:**
+   - **Error-boundary changes re-open their callees.** If the delta adds,
+     removes, moves, or widens a `try`/`catch`, a transaction boundary, a
+     retry, or any other error handler, every function it now wraps is back
+     in scope *even though unchanged*. Catching an error changes what stays
+     committed, so write ordering inside the callee that was irrelevant last
+     round becomes load-bearing this round. Walk the callee's writes in order
+     and name what survives a throw at each step. (Observed failure: a
+     per-order `catch` added at a settlement call site made an escrow
+     decrement commit ahead of the status patch it was paired with, stranding
+     orders in a non-terminal state — the callee was unchanged and was
+     skipped on that basis.)
+   - **A behaviour change re-opens its published surface.** If the delta
+     changes what an endpoint/CLI/API accepts or returns, grep the contract or
+     docs for that parameter's **examples**, not just its schema. A shipped
+     example the new behaviour rejects is a contract break. (Observed failure
+     twice: a declared default and a documented filter example, both rejected
+     by newly-added validation nobody checked the document for.)
+3. **A delta implementing a prior recommendation puts the recommendation
+   itself under review, not just its implementation.** Conformance is not
+   correctness. Do not ask "did they do what round {k} said?" — ask "is what
+   round {k} said right for *this* call site?" This matters most when the
+   recommendation said to copy a pattern from elsewhere in the codebase:
+   state explicitly what made the pattern safe at its original site and
+   verify that property holds here. If the reviewer wrote the prior
+   recommendation, say so in the round header and treat the reviewer as a
+   non-independent frame for that item — the review has no adversary on it.
+4. **Never restate.** A prior question or recommendation may reappear only if
    still-open, referenced by its ID — not rephrased as if new.
-4. **Same head, no new comments** → tell the user nothing changed and ask
+5. **Same head, no new comments** → tell the user nothing changed and ask
    what they want re-examined instead of redoing the same review, unless
-   the user or scheduler explicitly requested a forced re-review. In forced
-   same-head mode, re-run the requested checks and overwrite that SHA's
-   artifacts with the fresh verification.
+   the user or scheduler explicitly requested a forced re-review.
+
+   **Forced same-head mode inverts rule 2.** The delta is empty, so "review
+   only the delta" would instruct you to produce nothing — do not follow it
+   here. Instead:
+   - Re-derive on the highest-risk **unchanged** code, choosing targets by
+     consequence rather than by recency.
+   - You **may re-open findings a prior round marked resolved**. A prior
+     round's "resolved" is that round's own judgment, not an author
+     confirmation, and forced mode exists because someone doubts it.
+   - Set `GRAPH_BASE` to the PR's real base (merge-base or `mergeCommit^1`),
+     **not** `${PRIOR_HEAD}` — at the same head that is an empty diff, and
+     Pass 0 would return nothing while Step 0e sent you chasing a wrong base
+     ref that is in fact correct.
+   - **On a MERGED PR the diff is not empty — it is wrong, which is worse.**
+     The worktree checks out the *merge commit*, so `${PRIOR_HEAD}..HEAD`
+     picks up everything merged from the base branch in between. Observed: 57
+     files and 6,591 insertions of unrelated main-branch work, i.e. following
+     the instruction literally means reviewing other people's PRs and
+     attributing their code to this author. **Always diff against
+     `mergeCommit^1`** for a merged PR, and if the file list contains paths no
+     scope explains, stop and re-derive the base before reviewing anything.
+   - Overwrite that SHA's artifacts with the fresh verification.
+6. **Delta size never justifies skipping the contract pass.** A small repair
+   round is not a cheap round. The mandatory code-derived contract pass in
+   Pass 2 — especially the failure matrix (thrown error, partial success,
+   cleanup) — runs on every repair delta regardless of line count. Risk
+   tracks *what the change touches and who specified it*, not how many lines
+   it is.
+7. **The PR body and title are re-checked every round, even though they are
+   never in the delta.** Re-review moves the "Problem (as evidenced)" anchor to
+   the prior review ledger and the new commit messages, and the body silently
+   stops being read. Re-run **Step 0g** each round and restate its one-line
+   verdict in the round header — but Step 0g is **provenance only, and an "in
+   sync" verdict does not discharge this rule.**
+
+   **Carry the CLAIMS, not the pin.** Maintain a body-claims table in the
+   ledger. Populate it at round 1 and carry it forward:
+
+   - **Select by assertion shape, never by formatting.** A claim is any
+     sentence or list item that (a) carries a code identifier — backticked,
+     camelCase, snake_case, or a bracketed field list — or a quantity, and
+     (b) asserts a property with a verb like *is / are / never / only /
+     preserves / copies / indexes / derives / bounded / disagree / must*.
+     **Bullets count.** Do not require bold or a normative keyword: many
+     authors use neither, and a selector keyed on formatting silently reads
+     such a body as almost claimless. (Observed: on a claim-dense 47-line
+     body a formatting-keyed selector took 2 of ~8 verifiable claims, and the
+     six it dropped — `archiveMarketOrders` now preserving `clientOrderId`,
+     both tables indexing `[traderId, clientOrderId, clientLookupSortKey]`,
+     `sequence` never being copied, `nonce` unique only in the live table, the
+     `2 * (N + 1)` page bound, the compound-key cursor — were exactly the ones
+     a reader would build code from.)
+   - **Exclude** only what Step 0g already owns deterministically: SHA pins,
+     commit counts, trailer and check-run status. Keep verification *counts*
+     ("29 focused tests", "516 edge files") — those go stale silently and are
+     nobody else's job.
+   - Record each one **verbatim, one line**, with the `file:line` **at head**
+     that backs it. **A fragment is verified as its enclosing clause.** If the
+     selected span is a noun phrase that asserts nothing standing alone —
+     a bolded `` `Order.{a, b, c}` are chain-scoped `` inside a longer
+     sentence — record the enclosing clause, which is what is actually
+     falsifiable, and note the widening. Verifying the fragment as written is
+     vacuous, and "record it verbatim" must never be read as licence to test
+     something unfalsifiable.
+   - Measured budget for **this** selector over 166 real PR bodies: **median 9,
+     p75 12, p90 17, p95 20, max 26** claims — one `file:line` lookup each.
+     **Cap the table at 20**, which truncates only 3% of bodies; past the cap,
+     keep first the claims the **title** echoes, then those naming a symbol the
+     diff touches. Note this is ~4.5× the cost of a formatting-keyed selector,
+     and that is the correct price: the cheap version was cheap because it was
+     missing claims, and a low claim count measures the selector, not the body.
+
+   **Verify at every round including round 1.** For each claim, name the
+   `file:line` at head that still states it, or mark it **CONTRADICTED** and
+   cite the commit that reversed it. A claim you cannot locate at head is
+   contradicted, not merely unlocated. Any CONTRADICTED claim is a
+   Recommendation in its own right, at the severity of the wrong thing a reader
+   would build from it. Do not resolve a claim by re-reading the body — that is
+   circular; settle it against head.
+
+   (Validated against two observed misses on the same PR, #1223. **(a) The
+   seq-floor claim** — "Snapshot `seq` is a per-page replay floor, not a cursor
+   pin; `getPositionsSnapshot` qualifies" — was reversed by `3ab8c5200` "anchor
+   both paginated snapshots exactly". Missed at rounds 3 and 4; rounds 1 and 2
+   were correctly silent because it was still true then. Round 3 quoted that
+   commit's message saying positions had become exact, two paragraphs from
+   where the comparison would have happened. **(b) The chain-scope claim** —
+   "`Order.{quantity, filledQuantity, remainingQuantity}` are chain-scoped" —
+   was reversed for `remainingQuantity` by `a03a6147b` at 22:21:19Z, and the
+   body was written at 22:44:18Z, twenty-three minutes later. It was false the
+   moment it was written, was already contradicted at round 1's head
+   (`openapi.yaml:6306` read "NOT chain-scoped" there), survived all four
+   rounds *and* the author's own remediation edit, and is still in the merged
+   description. **No provenance check can ever reach (b)** — the body's
+   effective time is after the reversal, so Step 0g correctly reports "in
+   sync". That is why this rule runs independently of Step 0g, and why round 1
+   must verify rather than merely extract: an extract-only round 1 would have
+   recorded (b) and still shipped it.)
 
 If no prior review exists, proceed as round 1.
 
@@ -152,6 +287,9 @@ to `HEAD~1` and note the limitation.
 
 **Re-review mode**: use `GRAPH_BASE=${PRIOR_HEAD}` instead — the graph should
 score only what changed since the last review, matching the incremental diff.
+**Except in forced same-head mode**, where `${PRIOR_HEAD}` *is* the head and the
+diff is empty by construction: use the PR's real base there, or Pass 0 returns
+nothing and Step 0e sends you recomputing a base ref that was already right.
 
 ## Pass 0: Graph Reconnaissance
 
@@ -200,7 +338,38 @@ If `detect_changes` returns 0 changed functions despite a non-empty diff, the
 git diff --stat ${GRAPH_BASE}..HEAD
 ```
 
-If empty, recompute `GRAPH_BASE` and retry before proceeding.
+If empty, recompute `GRAPH_BASE` and retry before proceeding. In forced
+same-head mode an empty diff is expected, not a wrong base — see re-review
+rule 5 before recomputing anything.
+
+**A zero result on a non-empty diff also means the index is empty.** If the
+tool logged a schema migration or an index build on *this* invocation — e.g.
+`Schema version 1 -> 6: running migrations` — it built a fresh empty index for
+this worktree path and its zero is meaningless, not a finding. Check the tool's
+own output before concluding anything from a zero. (Observed: 0 changed
+functions, 0 flows, risk 0.00 on a genuinely non-empty 8-file diff, purely
+because the worktree path was new to the index.) Rebuild or point at the
+existing base graph, or record graph output as unavailable — never report
+risk 0.00 as evidence of low risk.
+
+**Also validate the tree, not just the count.** A substantive-looking result is
+not a valid one. Check that the returned symbol paths actually exist in the
+worktree you passed via `--repo`:
+
+```bash
+# every path the graph reports should resolve inside the review worktree
+ls "${WORKTREE}/<one reported path>"
+```
+
+If the paths resolve against the caller's checkout rather than the worktree,
+the whole result is scored against the wrong tree and must be discarded — the
+counts and risk scores will still look plausible. (Observed: a run reported
+risk 0.60, 72 changed functions and 38 test gaps computed against the wrong
+tree; two of its four highest-risk symbols had been **deleted** by the PR under
+review, and its ranking pointed away from every file where the findings
+actually were.) Validating only "0 changed functions returned" is blind to
+this. Note in the review that graph risk is anchored to the base graph, so
+PR-head-only files may be absent from it entirely.
 
 ### Step 0f — Repo-Intel ask (enhanced context)
 
@@ -269,6 +438,96 @@ Store repo-intel results for Pass 2. Repo-intel provides:
 
 **Skip this step** if repo-intel hook is not available (review still works with code-review-graph alone).
 
+### Step 0g — Description↔head provenance (deterministic; no model reasoning)
+
+The PR body and title are shipped artifacts, not just evidence. The title
+lands in the merge commit, and for a docs/spec PR the body's ruling **is** the
+deliverable. This step is timestamp and string comparison only — do not spend
+reasoning on it, and do not skip it because the body "looks fine".
+
+Inputs are already fetched: the body, its `lastEditedAt`, and `commits`.
+
+1. **Commits after the body's effective time.** Compare against each commit's
+   **`authoredDate`, never `committedDate`** — a rebase rewrites every
+   committer date to the rebase timestamp, which fabricates the count on ~15%
+   of PRs here. If only `committedDate` is available, say so on the output line
+   rather than reporting a number you cannot stand behind.
+   The body's effective time is
+   **`lastEditedAt` if present, otherwise `createdAt`** — never treat a null
+   `lastEditedAt` as unknown. GitHub returns null there when the body has
+   **never been edited since it was written**, in which case `createdAt` is
+   the body's authoritative timestamp and provenance is fully checkable. This
+   is the common case, not the exception: `lastEditedAt` is null on ~54% of
+   PRs, so reading null as "unknown" makes this step inert on the majority of
+   reviews. Count the commits that landed after the effective time. **If that
+   count is zero, this step reports "in sync" and stops** — every check below
+   requires at least one commit after the body's effective time.
+2. **Stale pin.** If the body cites a commit SHA on this branch, report how
+   many commits behind head it is. If the body states a commit count, compare
+   it to the real count.
+3. **Two suppressions, both mandatory.** Firing without them punishes the exact
+   remediation we want — an author who documents their own reversal:
+   - If the body cites **head** at all, every older SHA it cites is history,
+     not a stale pin. Suppress the pin check entirely.
+   - A SHA cited on the same line as a strictly **newer** cited SHA is a
+     transition (`` `A` → `B` ``), not a claim about what the PR describes.
+   Both are structural — they do not depend on past tense, "originally", or
+   blockquote formatting, so they generalize past one PR's phrasing.
+
+Emit one line into the review, **always, including when clean**. Say which
+timestamp the effective time came from, so the reader can tell whether the
+author ever revisited the body:
+
+    **Description↔head:** in sync
+    **Description↔head:** body last edited T; N commits since; body pins `X` (K behind); body says N commits, actual M
+    **Description↔head:** body written at PR creation and never edited; N commits since; body pins `X` (K behind)
+    **Description↔head:** UNAVAILABLE — no `createdAt` or `lastEditedAt` available, provenance not checked
+
+The `UNAVAILABLE` form is reserved for the genuine failure: **both** timestamps
+missing, or the GraphQL call failing. A null `lastEditedAt` alone is **not**
+that case — fall back to `createdAt` and run the check.
+**Never omit the line and never silently pass** — a check that can disappear
+without anyone noticing is how this class of defect survived four review rounds
+on PR #1223. (Observed failure of this very step: its first live run on PR
+#1214 emitted `UNAVAILABLE` on a null `lastEditedAt` while holding a perfectly
+good `createdAt`. Visible-and-inert is still inert.)
+
+Report the edited/never-edited distinction as fact, not as severity. Across 166
+multi-round PRs, never-edited bodies sit a median of 3 commits behind head
+against 0 for edited ones — authors typically revise the body last — but
+*conditional on this step firing* the two groups are equivalent (median 4.5 vs
+5.0 commits). So an unedited body means more exposure in the population, not a
+worse finding in the individual case.
+
+**"Fires" means a pin or count discrepancy — not a commit count.** Commits
+landing after the body's effective time is the *precondition* for the check,
+not a finding: 57% of PRs have that and nothing else, and treating it as a
+firing would push work into Pass 1b on 74% of reviews instead of 17%. Report
+the commit count on the line for context and stop there. Only a surviving
+stale pin or a wrong stated commit count escalates.
+
+When it does fire, Pass 1b must state whether the body's stated deliverable
+still describes head, and a divergence becomes a Recommendation in its own
+right, not a footnote.
+
+**Holding both halves at once.** The body is never *evidence* for what the PR
+does — Pass 1b is right to derive the problem from issues, commits and code
+rather than from the description. But the body and title are also *shipped
+artifacts* whose claims can be wrong, and for a docs/spec PR the ruling they
+state **is** the deliverable. These are not in tension once the roles are
+separated: **never believe the body; always check it.** Read it only as a set
+of falsifiable claims about head, never as a source of truth about the change.
+Resolving "does the body still describe head?" by re-reading the body is
+circular; every claim must be settled against a file:line at head.
+
+Evidentiary basis, for whoever tunes this next: the two suppressions were
+validated on PR #1223 as a positive→negative pair (fires at rounds 2/3/4 on
+the stale body; silent at round 1 and silent again after the author fixed the
+title and changelogged the reversal) plus a zero-regression run over 166
+multi-round PRs — identical firings before and after. Only 7 of those 166
+bodies anchor on head at all, so the suppression is not yet validated on a
+large sample of the pattern it protects.
+
 ### Store results for later passes
 
 - Pass 1 uses risk scores and test gaps to prioritize scopes
@@ -279,9 +538,26 @@ Store repo-intel results for Pass 2. Repo-intel provides:
 
 Read the full diff (or file list + stats if diff > 2000 lines).
 
-Group changes into **1-5 logical scopes**. A scope is a cohesive unit of
-change — not a file, but a concern. Changes across multiple files that serve
-the same purpose belong in one scope.
+Group changes into logical scopes. A scope is a cohesive unit of change — not
+a file, but a concern. Changes across multiple files that serve the same
+purpose belong in one scope. Aim for **1-5 scope narratives** to keep the
+document readable, but that is a bound on *narratives*, never on *coverage*:
+
+**Every changed file must be assigned — to exactly one scope, or to an explicit
+not-reviewed bucket with a stated reason.** A file that appears in neither is a
+defect in the scope map. Each scope must also list which of its files were
+actually opened, as against merely named. Every cost in this skill is paid per
+scope (lens dialogs, the contract pass, the reviewer/challenger loop), so with
+a fixed scope cap and no assignment obligation, cost stays constant while
+coverage silently absorbs PR size. That is the failure this obligation exists
+to prevent: a 64-file, 12,325-line PR received a 370-line review covering 17.3%
+of changed lines, with 36 of 64 files never opened and 52 absent from the scope
+map entirely — and the scope table looked complete because it was internally
+consistent.
+
+**Size increases work, it does not reduce it.** A bigger diff means more scopes
+and more files opened, not the same scopes read more thinly. If you cannot open
+a file, that is a not-reviewed entry with a reason, not silence.
 
 For each scope determine:
 
@@ -295,6 +571,27 @@ For each scope determine:
 Output the scope map as a markdown table (see below).
 
 ### Lens assignment
+
+**Assignment is per scope, and a lens may be declined per scope.** For each
+lens below other than Dev, either assign it or record one line saying why this
+scope does not need it — `Security: declined, no untrusted input in this
+scope`. A declined lens costs one line; an assigned lens owes real findings.
+
+Do not write a lens section that restates the scope without a finding. On a PR
+shipping runtime code everywhere, 11 lens sections produced ~8 distinct
+contributions with 4 concentrated in a single scope, and Security and SRE were
+rehearsals on 3 of 4 runtime scopes. Those rehearsals crowd out the reader's
+attention and inflate the review's apparent thoroughness. The previous
+always-assigned mandate was in practice routinely violated — the reviewer
+silently dropped Research from one scope, Dev from another, and SRE and
+Research from a third, precisely because the rehearsals were empty. Relaxing it
+deliberately is better than leaving a mandate that is ignored.
+
+This relaxes *assignment*, not rigour. **The reviewer/challenger dialog is not
+optional and is not weakened** — it is the highest-yield element in this skill.
+One challenger question ("explain why your probe disagrees with a green test
+exercising the same entry point") produced the finding that explained why nine
+prior rounds had missed a bug. An assigned lens runs its full dialog.
 
 - **Dev**: Always assigned. Every scope gets dev review.
 - **Security**: Assign when the scope touches authentication, authorization,
@@ -455,6 +752,28 @@ from code before deciding whether it is safe:
 6. **Boundary/integrity checks:** where applicable, check authorization,
    identity binding, untrusted input, external service trust, and cross-system
    consistency.
+7. **Mutation control on the cited proof.** Where the PR adds or points at a
+   test suite as the proof of a behavior, and the suite can actually be run,
+   break the load-bearing expressions one at a time and record which mutations
+   the suite **kills** and which it **survives**. Budget ~6 mutations; measured
+   at roughly 90 seconds with dependencies already installed.
+   Report it as a table, because the *pattern* is the finding, not any single
+   survivor. A clean split between killed behavioural mutations and surviving
+   encoder mutations says "every behavioural invariant is proven and the entire
+   encoder is unproven", which is far sharper — and far more actionable — than
+   "there is a proof gap". When mutations survive, name the root cause: a suite
+   whose assertions all compare a stored value against the same function's
+   output has no literal anchor anywhere and cannot catch an encoder change.
+   Then check whether sibling call sites share the pattern, since an unproven
+   encoder is usually repo-wide rather than PR-local.
+
+   **This is verification, not simulation.** "Suggest tests, don't simulate
+   them" under *What this review is NOT* forbids inventing test results and
+   asserting what a test would do. Running an existing suite against a
+   deliberately broken input and reporting the observed outcome is neither
+   simulating nor suggesting — it is the strongest evidence available about
+   whether a proof constrains anything. Restore every mutated source byte-for-
+   byte and say so.
 
 The challenger must pick concrete inputs/states from these axes and force the
 reviewer to trace them through the changed code. A green verdict is invalid if
@@ -640,7 +959,22 @@ If the diff exceeds ~2000 lines:
 3. **Pass 2**: Fetch per-scope diffs — `gh pr diff N -- path/to/relevant/dir`.
    Start with the highest graph-risk scopes.
 4. Focus investigation on the highest-risk scopes first
-5. If a scope is too large to analyze fully, note what was not examined
+5. If a scope is too large to analyze fully, note what was not examined —
+   as a **not-opened entry in the coverage ledger with a reason**, never as a
+   passing remark in prose. This instruction is a reporting requirement, not
+   permission to skip: it does not convert incomplete coverage into a complete
+   review.
+6. **Scale the work up, not down.** Every other instruction in this section
+   reduces effort per line, which is correct for *how* to read a large diff and
+   wrong for *how much*. A diff 10× the size gets more scopes and more files
+   opened. Budget the coverage ledger first — decide what you will open before
+   you start writing — and if the honest answer is that a meaningful share
+   cannot be reviewed, say so at the top and in the Short version, so the
+   reader knows the verdict covers part of the PR.
+7. **Never let the output caps drop a still-open prior-round finding.** The
+   ≤5 question / ≤7 recommendation caps in Actionable Output bound *new* items.
+   A finding a previous round raised and this round has not resolved is carried
+   regardless of the caps; if that pushes the list over, the caps yield.
 
 ## Verification and dependency bootstrap
 
@@ -674,10 +1008,36 @@ must also say what install command was attempted.
 
 See [output-format.md](output-format.md) for the complete output structure.
 
+### Coverage ledger — mandatory, immediately after the header
+
+Before the scope map, before the graph section, before anything else, emit a
+coverage ledger classifying **every changed file** as one of:
+
+- **reviewed** — opened and read in the scope it belongs to
+- **targeted-read** — specific hunks or symbols read, not the whole file
+- **not-opened** — with a stated reason
+
+End it with the totals and the share of changed lines actually read:
+
+    **Coverage:** 10/64 files reviewed, 18 targeted-read, 36 not-opened — 17.3% of changed lines read
+
+**Keep it one line per changed file up to ~60 files** — that covers ~85% of
+PRs here at a median cost of 13 lines. Above that, group rows by directory with
+per-directory {reviewed / targeted-read / not-opened} counts, which runs about
+12% of the flat size, and enumerate individual files only where a not-opened
+file carries runtime risk. The totals line is mandatory at every size — it is
+the number a reader prices the review by.
+
+**This goes at the top, not the bottom.** A review that buries its coverage
+list reads as complete regardless of what the list says; at the top, a 17%
+review is self-evidently a 17% review and the reader can price everything
+below it. Placement is the whole point of this section — an accurate ledger in
+the wrong position is what let a 17% review pass as finished.
+
 Key conventions:
 
 - H1 = PR title with number
-- H2 = scope map + per-scope sections + overall verdict
+- H2 = coverage ledger + scope map + per-scope sections + overall verdict
 - H3 = lens findings, dialog rounds, verdict
 - Severity: `🔴 Critical` `🟡 Caution` `🟢 Good` `⚪ Neutral`
 - Code refs: `` `path/to/file.ts:42` `` inline
@@ -751,8 +1111,14 @@ Maintain a `### Findings Ledger` table, cumulative across rounds:
 Assemble a ready-to-post review comment containing exactly these sections, in
 this order: Short version, Questions for the Author, Recommendations. Do not
 include Delta Since Last Review, Findings Ledger, scope details, graph analysis,
-or any other section in the comment draft. Append the signature:
-`Codex on behalf of Sasha`. Write it to `${REVIEW_DIR}/<short-sha>-comment.md`.
+or any other section in the comment draft. Append a signature naming the agent
+that **actually ran this review** and the account it runs on behalf of —
+`<driver> on behalf of <repo owner>`, e.g. `Codex on behalf of Sasha` when
+Codex ran it. Do not copy that example verbatim when a different driver ran the
+review: the signature is an attribution line on a comment posted to GitHub, and
+hardcoding one agent's name makes every other reviewer sign as that agent. If
+the driver is genuinely unknown, use `Automated review on behalf of <owner>`.
+Write it to `${REVIEW_DIR}/<short-sha>-comment.md`.
 Do not duplicate the draft inline in the chat; mention the path. Offer (but
 never run unprompted):
 
@@ -772,7 +1138,7 @@ Before ending the turn, write the **full review output** (everything from the H1
 ```bash
 REPO_NAME="$(basename "$(git rev-parse --show-toplevel)")"
 SHORT_SHA="$(git rev-parse --short "${NEW_HEAD:-HEAD}")"   # the reviewed head
-REVIEW_DIR="$HOME/reviews/${REPO_NAME}/PR-<N>"
+REVIEW_DIR="${DEEPREVIEW_REVIEW_DIR:-$HOME/reviews/${REPO_NAME}}/PR-<N>"
 mkdir -p "${REVIEW_DIR}"
 # Write ${REVIEW_DIR}/${SHORT_SHA}.md and ${REVIEW_DIR}/${SHORT_SHA}-comment.md
 ```
@@ -805,7 +1171,10 @@ Stay in the conversation. The user may:
 
 - Not a rubber stamp. If the PR is bad, say so.
 - Not a style nitpick generator. Focus on what matters.
-- Not a replacement for running the code. Suggest tests, don't simulate them.
+- Not a replacement for running the code. Suggest tests, don't simulate them —
+  never assert what a test *would* do. Running an existing suite, including
+  against a deliberately mutated source, and reporting what it actually did is
+  verification and is explicitly in scope (see the contract pass, axis 7).
 - Not a single-lens tool. The research lens exists to ask whether the code
   should exist at all, not just whether it's well-written.
 
