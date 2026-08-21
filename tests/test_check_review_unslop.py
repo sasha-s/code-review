@@ -40,11 +40,16 @@ Additionally, this is crucial — let me know if more detail would help.
     def test_ignores_code_fences_inline_code_and_table_delimiters(self):
         text = """## Short version
 
-`landscape — value`
+Use ``landscape ` — value`` unchanged.
 
-```text
+~~~~text
 Additionally — quoted fixture
-```
+~~~~
+
+````text
+```nested fence```
+Additionally — quoted fixture
+````
 
 | Claim | Status |
 | --- | --- |
@@ -52,24 +57,52 @@ Additionally — quoted fixture
         self.assertEqual([], self.check(text))
 
     def test_checks_human_facing_table_cells(self):
-        text = """| Claim | Status |
+        text = """## Findings ledger
+
+| Claim | Status |
 | --- | --- |
 | Additionally — source quote | checked |
 """
         rules = {finding.rule for finding in self.check(text)}
         self.assertEqual({"punctuation", "vocabulary"}, rules)
 
+    def test_preserves_verbatim_body_claims(self):
+        text = """## Body claims
+
+| Claim | Status |
+| --- | --- |
+| Additionally — source quote | checked |
+
+## Short version
+
+The implementation matches the claim.
+"""
+        self.assertEqual([], self.check(text))
+
     def test_distinguishes_list_markers_from_prose_dash_separators(self):
         text = """## Recommendations
 
 - Keep this list item.
   - Keep this nested list item too.
-- Replace this - it joins two clauses.
+> - Keep this quoted list item.
+> - Replace this - it joins two clauses.
 """
         findings = self.check(text)
         self.assertEqual(1, len(findings))
         self.assertEqual("dash-substitute", findings[0].rule)
-        self.assertEqual(5, findings[0].line)
+        self.assertEqual(6, findings[0].line)
+
+    def test_accepts_sentence_case_acronym_heading(self):
+        self.assertEqual([], self.check("## PR design & problem fit\n"))
+        findings = self.check("## PR Design & Problem Fit\n")
+        self.assertEqual(["heading"], [finding.rule for finding in findings])
+
+    def test_rejects_plain_word_substitutions_from_unslop(self):
+        findings = self.check("We leverage this helper to facilitate numerous reviews.\n")
+        self.assertEqual(
+            ["facilitate", "leverage", "numerous"],
+            sorted(finding.message.rsplit("'", 2)[1] for finding in findings),
+        )
 
 
 if __name__ == "__main__":

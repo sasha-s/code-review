@@ -1175,7 +1175,7 @@ do
   [ -f "$UNSLOP_SKILL" ] && break
 done
 [ -f "${UNSLOP_SKILL:-}" ] || {
-  printf '%s\n' "global unslop skill is missing" >&2
+  printf '%s\n' "global unslop skill is missing; follow ~/code-review/README.md#agent-bootstrap-for-unslop" >&2
   exit 1
 }
 ```

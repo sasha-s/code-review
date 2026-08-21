@@ -26,6 +26,45 @@ The installer is idempotent and bootstraps everything needed:
 
 Re-run safely — existing correct symlinks are left alone, already-installed CLIs skipped, already-cloned repos are not pulled, and pre-existing non-symlink skills are left untouched with a warning.
 
+### Agent bootstrap for unslop
+
+`deepreview` invokes the global `unslop` skill after it finishes both review
+files. The canonical skill lives in `sasha-s/agent-setup`, not this repository.
+Before a review, agents should verify the shared, Claude Code, and Codex copies.
+Run the canonical installer if any copy is missing:
+
+```bash
+unslop_missing=0
+for skill_file in \
+  "$HOME/.agents/skills/unslop/SKILL.md" \
+  "$HOME/.claude/skills/unslop/SKILL.md" \
+  "$HOME/.codex/skills/unslop/SKILL.md"
+do
+  [ -f "$skill_file" ] || unslop_missing=1
+done
+
+if [ "$unslop_missing" -ne 0 ]; then
+  AGENT_SETUP_REPO="${AGENT_SETUP_REPO:-$HOME/.buzz/REPOS/agent-setup}"
+  if [ ! -d "$AGENT_SETUP_REPO/.git" ]; then
+    mkdir -p "$(dirname "$AGENT_SETUP_REPO")"
+    git clone https://github.com/sasha-s/agent-setup.git "$AGENT_SETUP_REPO"
+  fi
+  [ -f "$AGENT_SETUP_REPO/skills/unslop/SKILL.md" ] || {
+    printf '%s\n' "canonical agent-setup checkout does not contain unslop" >&2
+    exit 1
+  }
+  "$AGENT_SETUP_REPO/install.sh" --dry-run
+  "$AGENT_SETUP_REPO/install.sh"
+  "$AGENT_SETUP_REPO/install.sh" --check
+fi
+```
+
+The `agent-setup` installer manages its full skill set and may repair other
+skill symlinks. Its dry run shows that wider change before installation. After
+the check passes, start a fresh Claude Code or Codex session so the host
+registers the skill. The TheEdge Pi fallback loads the shared
+`~/.agents/skills/unslop` copy directly.
+
 After install, hosts that need an explicit repo-intel hook path should set:
 
 ```bash
@@ -48,6 +87,7 @@ Symlinked skills track the repo, so no re-install is needed after a pull (unless
 | Requirement | Auto-fix on miss? |
 | --- | --- |
 | Current host (Claude Code, Codex, or Pi) can load `sync-and-review` and `deepreview` skills | Run `./install.sh` |
+| Global `unslop` skill exists in shared, Claude Code, and Codex roots | Follow Agent bootstrap for unslop above |
 | `gh` CLI authenticated (`gh auth status` passes) | No — interactive login |
 | `code-review-graph` on `PATH` | No — install choice (uv / pipx / etc.) |
 | Claude Code `<repo>/.mcp.json` has a `code-review-graph` entry | **Yes** — runs `code-review-graph install --platform claude-code`, reverts the installer's over-reach (CLAUDE.md patch, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`), appends `.mcp.json` + `.code-review-graph/` to `.gitignore` if missing. **Requires a Claude Code restart afterwards** — the skill stops at that point. |

@@ -33,11 +33,14 @@ BANNED_WORDS = (
     "delve",
     "enduring",
     "enhance",
+    "facilitate",
     "fostering",
     "garner",
     "interplay",
     "intricate",
     "landscape",
+    "leverage",
+    "numerous",
     "pivotal",
     "showcase",
     "tapestry",
@@ -70,22 +73,22 @@ BANNED_PHRASES = {
 }
 
 LEGACY_TITLE_CASE_HEADINGS = {
-    "body claims",
-    "coverage ledger",
-    "delta since last review",
-    "findings ledger",
-    "graph reconnaissance",
-    "overall verdict",
-    "pr design & problem fit",
-    "questions for the author",
-    "scope map",
-    "short version",
-    "step back: cross-scope research",
+    "Body Claims",
+    "Coverage Ledger",
+    "Delta Since Last Review",
+    "Findings Ledger",
+    "Graph Reconnaissance",
+    "Overall Verdict",
+    "PR Design & Problem Fit",
+    "Questions for the Author",
+    "Scope Map",
+    "Short Version",
+    "Step Back: Cross-Scope Research",
 }
 
 
 def _strip_inline_code(line: str) -> str:
-    return re.sub(r"`[^`]*`", "", line)
+    return re.sub(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", "", line)
 
 
 def _is_markdown_syntax(line: str) -> bool:
@@ -99,23 +102,39 @@ def _is_markdown_syntax(line: str) -> bool:
 
 def check_text(path: Path, text: str) -> list[Finding]:
     findings: list[Finding] = []
-    in_fence = False
+    fence_char = ""
+    fence_length = 0
+    current_section = ""
 
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        if raw_line.lstrip().startswith("```"):
-            in_fence = not in_fence
+        fence = re.match(r"^\s*(`{3,}|~{3,})(.*)$", raw_line)
+        if fence_char:
+            marker = fence.group(1) if fence else ""
+            suffix = fence.group(2) if fence else ""
+            if marker.startswith(fence_char) and len(marker) >= fence_length and not suffix.strip():
+                fence_char = ""
+                fence_length = 0
             continue
-        if in_fence or _is_markdown_syntax(raw_line):
+        if fence:
+            fence_char = fence.group(1)[0]
+            fence_length = len(fence.group(1))
+            continue
+        if _is_markdown_syntax(raw_line):
             continue
         if raw_line.startswith("# "):
             continue
 
         line = _strip_inline_code(raw_line)
-        heading = re.match(r"^#{2,6}\s+(.+?)\s*$", line)
+        heading = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
         if heading:
-            title = heading.group(1)
-            if title.lower() in LEGACY_TITLE_CASE_HEADINGS and title != title.capitalize():
+            title = heading.group(2)
+            if len(heading.group(1)) == 2:
+                current_section = title.lower()
+            if title in LEGACY_TITLE_CASE_HEADINGS:
                 findings.append(Finding(path, line_number, "heading", "use sentence case for this heading"))
+
+        if current_section == "body claims" and raw_line.lstrip().startswith("|"):
+            continue
 
         for char, name in UNICODE_PUNCTUATION.items():
             if char in line:
@@ -131,7 +150,7 @@ def check_text(path: Path, text: str) -> list[Finding]:
                 if re.search(pattern, lowered):
                     findings.append(Finding(path, line_number, rule, "rewrite AI-pattern phrase"))
 
-        prose = re.sub(r"^\s*[-*+]\s+", "", line)
+        prose = re.sub(r"^\s*(?:>\s*)*[-*+]\s+", "", line)
         if re.search(r"\s-\s", prose):
             findings.append(Finding(path, line_number, "dash-substitute", "replace prose ' - ' separator with a sentence"))
 
