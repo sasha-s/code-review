@@ -2,9 +2,9 @@
 
 Structured markdown that works in three contexts:
 
-1. **Terminal** — raw markdown, readable as-is
-2. **Bridge thread** — rendered with syntax highlighting and clickable paths
-3. **Bridge + voice** — narration reads verdict sections
+1. **Terminal.** Raw markdown, readable as-is.
+2. **Bridge thread.** Rendered with syntax highlighting and clickable paths.
+3. **Bridge and voice.** Narration reads verdict sections.
 
 ## Document structure
 
@@ -13,18 +13,18 @@ Structured markdown that works in three contexts:
 
 **Author:** {author} | **Base:** {base} → **Head:** {head} @ {short_sha}
 **Files changed:** {count} | **+{additions}** | **-{deletions}**
-**Review round:** {n} — prior rounds: r1 {date} @ {sha} (omit this line on round 1)
+**Review round:** {n}. Prior rounds: r1 {date} @ {sha} (omit this line on round 1)
 **Description↔head:** {in sync | provenance finding | unavailable reason}
 
-## Coverage Ledger
+## Coverage ledger
 
 | File | Read status | Scope | Evidence or not-opened reason |
 | --- | --- | --- | --- |
 | `{path}` | reviewed | 1 | full file opened |
 | `{path}` | targeted-read | 2 | `{symbols or hunks}` |
-| `{path}` | not-opened | — | `{reason}` |
+| `{path}` | not-opened | n/a | `{reason}` |
 
-**Coverage:** {reviewed}/{changed} files reviewed, {targeted} targeted-read, {not_opened} not-opened — {percent}% of changed lines read
+**Coverage:** {reviewed}/{changed} files reviewed, {targeted} targeted-read, {not_opened} not-opened. {percent}% of changed lines read.
 
 For more than about 60 files, group rows by directory with reviewed,
 targeted-read, and not-opened counts. Keep individual rows for not-opened files
@@ -32,11 +32,11 @@ that carry runtime risk. The totals line remains mandatory.
 
 ---
 
-{PR description summary — 1-2 sentences}
+{PR description summary in 1-2 sentences}
 
 ---
 
-## Body Claims
+## Body claims
 
 | Claim from PR body/title | Head evidence | Status |
 | --- | --- | --- |
@@ -48,7 +48,7 @@ and check-run status; keep all other assertion-shaped code and quantity claims.
 
 ---
 
-## Scope Map
+## Scope map
 
 | #   | Scope  | Files       | Lenses        | Nature   | Risk | Flows |
 | --- | ------ | ----------- | ------------- | -------- | ---- | ----- |
@@ -63,7 +63,7 @@ or a per-scope decline with the reason.
 
 ---
 
-## Graph Reconnaissance (if available)
+## Graph reconnaissance (if available)
 
 **Risk score:** {overall} | **Changed functions:** {count} | **Affected flows:** {count} | **Impacted files:** {count}
 
@@ -73,44 +73,44 @@ or a per-scope decline with the reason.
 | {name} | {path} | {score} | {yes/no} |
 
 **Highest-criticality flows:**
-- {flow name} (criticality {score}) — {node_count} nodes, {file_count} files
+- {flow name} (criticality {score}). {node_count} nodes, {file_count} files.
 - ...
 
 (Omit this entire section if code-review-graph is not available.)
 
 ---
 
-## PR Design & Problem Fit
+## PR design and problem fit
 
-**Problem (as evidenced):** {from linked issue/discussion/data — flag if it differs from the PR description}
+**Problem (as evidenced):** {from linked issue/discussion/data; flag if it differs from the PR description}
 
 **Approach:** {high-level strategy}
 
-**Design rationale:** {stated or inferred — mark which}
+**Design rationale:** {stated or inferred; mark which}
 
 **Established patterns:** {whether it follows repo conventions}
 
-**If we do nothing:** {consequence, or "unknown — asked below"}
+**If we do nothing:** {consequence, or "unknown; asked below"}
 
-**Simplest credible alternative:** {what a newcomer would build, and why the PR's approach is or isn't better}
+**Simplest credible alternative:** {what a newcomer would build and why the PR's approach is or is not better}
 
 **Problem-fit verdict:** {🟢|🟡|🔴} {one sentence, citing evidence}
 
 ---
 
-## Delta Since Last Review (re-review only)
+## Delta since last review (re-review only)
 
-**Resolved:** {ID — one clause — resolving commit/comment}
-**Still open:** {ID — current state, escalated or not}
+**Resolved:** {ID in one clause, with resolving commit/comment}
+**Still open:** {ID with current state and escalation status}
 **New since {prior short_sha}:** {what the incremental diff touches}
 
-Unchanged scopes: {list} — not re-reviewed.
+Unchanged scopes: {list}. These were not re-reviewed.
 
 ---
 
 ## Scope 1: {name}
 
-### Dev Review
+### Dev review
 
 **Reviewer:**
 {Analysis with severity markers and code references}
@@ -123,13 +123,13 @@ Unchanged scopes: {list} — not re-reviewed.
 > **Challenger:** {Probing question or challenge}
 
 **Reviewer:**
-{Response — may revise, add, or defend with evidence}
+{Response may revise, add, or defend with evidence}
 
 > **Challenger:** {Follow-up or satisfaction}
 
-**Verdict:** 🟡 Caution — {one-sentence summary}
+**Verdict:** 🟡 Caution. {one-sentence summary}
 
-### Security Review
+### Security review
 
 {Same dialog pattern}
 
@@ -141,27 +141,27 @@ Unchanged scopes: {list} — not re-reviewed.
 
 ---
 
-## Step Back: Cross-Scope Research
+## Step back: cross-scope research
 
 {Cross-scope research synthesis from SKILL.md Pass 3}
 
-## Overall Verdict
+## Overall verdict
 
 | Scope  | Dev         | Security   | Research   |
 | ------ | ----------- | ---------- | ---------- |
-| {name} | 🟢 Good     | 🟡 Caution | —          |
-| {name} | 🔴 Critical | —          | 🟡 Caution |
+| {name} | 🟢 Good     | 🟡 Caution | n/a        |
+| {name} | 🔴 Critical | n/a        | 🟡 Caution |
 
-### Questions for the Author
+### Questions for the author
 
-1. **Q1** {severity} — {only what the review could not answer itself after trying (author intent, ops policy, external context); never anything resolvable by grepping/reading the repo; ≤5 items; 1-2 sentences with `file:line`}
+1. **Q1** {severity}. {Only what the review could not answer itself after trying (author intent, ops policy, external context); never anything resolvable by grepping/reading the repo; ≤5 items; 1-2 sentences with `file:line`}
 
 ### Recommendations
 
-1. **R1** {severity} — {root-cause-deduped, severity-ordered; ≤7 items; 1-2 sentences with `file:line`}
+1. **R1** {severity}. {Root-cause-deduped, severity-ordered; ≤7 items; 1-2 sentences with `file:line`}
 2. ...
 
-### Findings Ledger
+### Findings ledger
 
 | ID | Sev | Scope | Finding | Status |
 | R1 | 🔴 | 2 | {one line} | open (r1) |
@@ -178,10 +178,10 @@ Unchanged scopes: {list} — not re-reviewed.
 ### Severity markers
 
 Use inline, not in headings:
-- 🔴 **Critical** — must fix before merge
-- 🟡 **Caution** — should fix or explicitly acknowledge
-- 🟢 **Good** — positive observation
-- ⚪ **Neutral** — informational, no action needed
+- 🔴 **Critical.** Must fix before merge.
+- 🟡 **Caution.** Should fix or explicitly acknowledge.
+- 🟢 **Good.** Positive observation.
+- ⚪ **Neutral.** Informational, no action needed.
 
 ### Code references
 
@@ -193,7 +193,7 @@ Use inline, not in headings:
 
 - **Reviewer** text: plain paragraphs under `**Reviewer:**` bold label
 - **Challenger** questions: blockquotes with `> **Challenger:**` prefix
-- Each round flows naturally — no round numbering needed
+- Each round flows naturally. No round numbering is needed.
 - Keep each reviewer response focused (2-5 findings per lens)
 - Keep each challenger probe focused (2-3 questions per round)
 
@@ -201,8 +201,8 @@ Use inline, not in headings:
 
 - One H2 per scope, titled `## Scope N: {name}`
 - One H3 per lens within the scope
-- Dialog rounds within the H3 — no deeper heading nesting
-- In the final section, use this order: `Questions for the Author` → `Recommendations` → `Findings Ledger` → `Short version`
+- Dialog rounds stay within the H3. Do not add deeper heading levels.
+- In the final section, use this order: `Questions for the author` → `Recommendations` → `Findings ledger` → `Short version`
 - `Short version` should sound like a person talking, not a template dump
 
 ### Plain language
@@ -210,20 +210,30 @@ Use inline, not in headings:
 The final sections (Questions, Recommendations, Short version) may be read
 by people who never saw the rest of the review. For those sections:
 
-- Complete sentences only — no fragments, no arrow chains, no telegraphic
+- Complete sentences only. Do not use fragments, arrow chains, or telegraphic
   compression
 - No shorthand or labels invented during the review; say what is meant in
   place
 - Unfamiliar identifiers get their role on first mention:
   "`probeMintDrift` (the mint health check)"
-- Every 🔴/🟡 states its concrete consequence — what breaks, for whom
+- Every 🔴/🟡 states its concrete consequence, including what breaks and for whom
+
+### Unslop gate
+
+- Load and apply the global `unslop` skill to the full review and GitHub draft.
+- Keep colored severity markers because they carry status; remove decorative emoji.
+- Use sentence case headings and sentences instead of prose dash separators.
+- Run `scripts/check_review_unslop.py` against both files. Any finding blocks
+  completion and posting until the prose is repaired.
+- A clean checker result covers objective patterns only. The full editorial
+  pass remains mandatory.
 
 ### Finding evidence contract
 
 - Every 🔴/🟡 recommendation or ledger row names the changed source ref, the
   branch/input shape that triggers it, the immediate source-level outcome, and
   the downstream consequence
-- A Finding Ledger row that is not posted as a Recommendation must say why:
+- A Findings ledger row that is not posted as a Recommendation must say why:
   `merged into R#`, `rejected: {source fact}`, `unresolved gap: {missing
   proof}`, or `low-value/non-runtime`
 - A rejection source fact only applies to the exact branch and consequence it
@@ -235,7 +245,7 @@ by people who never saw the rest of the review. For those sections:
   SKILL.md: clustered by root cause, capped (≤5 Q / ≤7 R), stable IDs across
   review rounds, question-vs-recommendation never overlapping, written as
   self-contained plain sentences
-- The Findings Ledger is cumulative across rounds — never delete a row, only
+- The Findings ledger is cumulative across rounds. Never delete a row; only
   update its Status
 - A ready-to-post GitHub comment containing only Short version, Questions, and
   Recommendations is signed `<driver> on behalf of <repo owner>`, using the

@@ -106,8 +106,8 @@ prior round. Extract from it:
 - The **reviewed head SHA** — the filename (confirm against the header; a
   legacy in-repo review may lack it — then use `gh pr view <N> --json
   commits` and the file's date to find which commits are new)
-- The **Findings Ledger** (IDs, severities, statuses)
-- The prior Questions for the Author and Recommendations
+- The **Findings ledger** (IDs, severities, statuses)
+- The prior Questions for the author and Recommendations
 
 Then compute the incremental diff and check for author responses:
 
@@ -616,7 +616,7 @@ prior rounds had missed a bug. An assigned lens runs its full dialog.
 Output the scope map as a markdown table:
 
 ```markdown
-## Scope Map
+## Scope map
 
 | #   | Scope | Files | Lenses        | Nature   | Risk | Flows |
 | --- | ----- | ----- | ------------- | -------- | ---- | ----- |
@@ -672,7 +672,7 @@ comment, log, file) — a problem-fit verdict without cited evidence is
 invalid:
 
 ```markdown
-## PR Design & Problem Fit
+## PR design and problem fit
 
 **Problem (as evidenced)**: {the problem the evidence shows — may differ from the PR description; say so if it does}
 
@@ -849,7 +849,7 @@ must not agree too easily. Switch cognitive frames between roles.
 **Verdict:** {severity marker} {one-sentence summary}
 ```
 
-## Pass 3: Step Back — Cross-Scope Research Synthesis
+## Pass 3: Step back and run cross-scope research
 
 After all per-scope reviews complete, run a final research pass that examines
 the PR **as a whole**. This pass is the critic to the PR's implicit actor.
@@ -897,7 +897,7 @@ and not repeat Pass 1b's text.
 Add a section after all per-scope reviews:
 
 ```markdown
-## Step Back: Cross-Scope Research
+## Step back: cross-scope research
 
 **Data flow**: {input} → {transformations} → {output}. Ratio: {N}:{M}.
 
@@ -1043,8 +1043,8 @@ Key conventions:
 - Code refs: `` `path/to/file.ts:42` `` inline
 - Diff blocks: ` ```diff ` fenced code
 - Challenger dialog: blockquotes with `**Challenger:**` prefix
-- End with `### Questions for the Author`, `### Recommendations`,
-  `### Findings Ledger`, then `### Short version` — built per the
+- End with `### Questions for the author`, `### Recommendations`,
+  `### Findings ledger`, then `### Short version` — built per the
   Actionable Output rules below
 - `### Short version` should be brief, plain-English, and sound human — a
   teammate who hasn't read the diff or the review should understand it
@@ -1063,7 +1063,7 @@ concatenate per-lens findings:
    the root cause, not each symptom.
 3. **Preserve source-backed candidates.** Run the Candidate preservation audit
    before applying caps. If a source-backed 🟡/🔴 candidate is not posted as a
-   Recommendation, the Findings Ledger must explain whether it was merged into
+   Recommendation, the Findings ledger must explain whether it was merged into
    another item, rejected by a source fact, or left as an unresolved gap.
 4. **Question vs recommendation.** If the review knows what should change,
    it's a recommendation. Only genuinely unresolved uncertainties — things
@@ -1098,7 +1098,7 @@ concatenate per-lens findings:
    breaks and for whom ("loses payment events on restart"), not leave the
    reader to infer why the marker is there.
 
-Maintain a `### Findings Ledger` table, cumulative across rounds:
+Maintain a `### Findings ledger` table, cumulative across rounds:
 
 ```markdown
 | ID | Sev | Scope | Finding | Status |
@@ -1109,8 +1109,8 @@ Maintain a `### Findings Ledger` table, cumulative across rounds:
 ### GitHub comment draft
 
 Assemble a ready-to-post review comment containing exactly these sections, in
-this order: Short version, Questions for the Author, Recommendations. Do not
-include Delta Since Last Review, Findings Ledger, scope details, graph analysis,
+this order: Short version, Questions for the author, Recommendations. Do not
+include Delta since last review, Findings ledger, scope details, graph analysis,
 or any other section in the comment draft. Append a signature naming the agent
 that **actually ran this review** and the account it runs on behalf of —
 `<driver> on behalf of <repo owner>`, e.g. `Codex on behalf of Sasha` when
@@ -1148,14 +1148,71 @@ mkdir -p "${REVIEW_DIR}"
   SHA's file only.
 - The header MUST still record the full head SHA and the round number, and
   list prior rounds (`Round 2 — r1: 2026-06-01 @ abc1234`).
-- The Findings Ledger in the newest file is cumulative across all rounds —
+- The Findings ledger in the newest file is cumulative across all rounds —
   it alone is enough to resume; older round files are history.
-- The file content is the same markdown you produced inline. Do not abbreviate. Keep the H1 title, scope map, per-scope dialogs, step-back, overall verdict, Questions for the Author, Recommendations, Findings Ledger, and Short version.
+- The file content is the same markdown you produced inline. Do not abbreviate. Keep the H1 title, scope map, per-scope dialogs, step-back, overall verdict, Questions for the author, Recommendations, Findings ledger, and Short version.
 - In the chat, after writing the files, mention the paths explicitly (one line: `Wrote ~/reviews/<repo>/PR-<N>/<short-sha>.md`).
 - Reviews live outside the repo by design — never write them into the repo
   tree, and never commit them.
 
 This is what makes the review repeatable: future operators (or the same operator a week later) can read the newest file in `~/reviews/<repo>/PR-<N>/` directly rather than re-running the skill.
+
+### Final editorial pass
+
+After both review files are complete, invoke the installed global `unslop`
+skill. Do not recreate a shortened version of its rules inside this skill. The
+search below verifies the installation and gives file-driven runners the exact
+skill path. Check the shared and host roots in this order and read the first
+`SKILL.md` found:
+
+```bash
+for UNSLOP_SKILL in \
+  "$HOME/.agents/skills/unslop/SKILL.md" \
+  "$HOME/.claude/skills/unslop/SKILL.md" \
+  "$HOME/.codex/skills/unslop/SKILL.md" \
+  "$HOME/.pi/skills/unslop/SKILL.md"
+do
+  [ -f "$UNSLOP_SKILL" ] && break
+done
+[ -f "${UNSLOP_SKILL:-}" ] || {
+  printf '%s\n' "global unslop skill is missing" >&2
+  exit 1
+}
+```
+
+Apply that skill to `${REVIEW_DIR}/${SHORT_SHA}.md` and
+`${REVIEW_DIR}/${SHORT_SHA}-comment.md` as the last writing step. This is an
+edit, not a summary. Preserve every finding, severity, source reference,
+stable ID, and ledger status. The colored severity markers are semantic status
+indicators, so keep them.
+
+Do not treat global prompt injection as proof that this pass ran. After the
+skill finishes, locate the installed `deepreview` skill, resolve its repository
+root, and run the objective checker against both edited files:
+
+```bash
+DEEPREVIEW_SKILL=""
+for candidate in \
+  "$HOME/.agents/skills/deepreview/SKILL.md" \
+  "$HOME/.claude/skills/deepreview/SKILL.md" \
+  "$HOME/.codex/skills/deepreview/SKILL.md" \
+  "$HOME/.pi/skills/deepreview/SKILL.md"
+do
+  if [ -f "$candidate" ]; then
+    DEEPREVIEW_SKILL="$(realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+    break
+  fi
+done
+[ -n "$DEEPREVIEW_SKILL" ] || exit 1
+CODE_REVIEW_ROOT="$(cd "$(dirname "$DEEPREVIEW_SKILL")/../.." && pwd)"
+python3 "$CODE_REVIEW_ROOT/scripts/check_review_unslop.py" \
+  "${REVIEW_DIR}/${SHORT_SHA}.md" \
+  "${REVIEW_DIR}/${SHORT_SHA}-comment.md"
+```
+
+Any nonzero result blocks completion and posting. Rewrite the reported lines,
+apply `unslop` again, and rerun the checker. The checker covers objective
+patterns only. A clean exit does not replace the skill.
 
 ## After the review
 
